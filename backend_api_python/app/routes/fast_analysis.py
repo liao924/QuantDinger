@@ -22,6 +22,72 @@ _analysis_inflight_lock = threading.Lock()
 _analysis_inflight = {}  # key -> expire_ts
 
 
+def _try_refund_credits(user_id: int, amount: int, remark: str):
+    """Best-effort async refund when task fails after pre-charge."""
+    try:
+        if int(amount or 0) <= 0:
+            return
+        billing = get_billing_service()
+        billing.add_credits(
+            user_id=int(user_id),
+            amount=int(amount),
+            action='refund',
+            remark=remark
+        )
+    except Exception as e:
+        logger.error(f"Async auto refund failed: {e}", exc_info=True)
+
+
+def _run_async_analysis_task(task_memory_id: int, market: str, symbol: str, language: str,
+                             model: str, timeframe: str, user_id: int, inflight_key: str,
+                             credits_charged: int = 0):
+    """
+    Background worker: execute analysis and update pending history record.
+    """
+    try:
+        service = get_fast_analysis_service()
+        memory = get_analysis_memory()
+        result = service.analyze(
+            market=market,
+            symbol=symbol,
+            language=language,
+            model=model,
+            timeframe=timeframe,
+            user_id=user_id
+        )
+        memory.finalize_pending_task(task_memory_id, result)
+        if result.get("error"):
+            _try_refund_credits(
+                user_id=int(user_id),
+                amount=int(credits_charged or 0),
+                remark=f'Auto refund: async fast-analysis failed ({market}:{symbol}:{timeframe})'
+            )
+
+        # analyze() already stores a separate memory row; remove it to avoid duplicates.
+        auto_memory_id = result.get("memory_id")
+        if auto_memory_id and int(auto_memory_id) != int(task_memory_id):
+            try:
+                memory.delete_history(int(auto_memory_id), user_id=user_id)
+            except Exception:
+                pass
+    except Exception as e:
+        logger.error(f"Async analysis task failed: {e}", exc_info=True)
+        _try_refund_credits(
+            user_id=int(user_id),
+            amount=int(credits_charged or 0),
+            remark=f'Auto refund: async fast-analysis exception ({market}:{symbol}:{timeframe})'
+        )
+        try:
+            get_analysis_memory().fail_pending_task(task_memory_id, str(e))
+        except Exception:
+            pass
+    finally:
+        try:
+            _release_inflight(inflight_key)
+        except Exception:
+            pass
+
+
 def _build_inflight_key(user_id: int, market: str, symbol: str, timeframe: str) -> str:
     return f"{int(user_id)}|{str(market or '').strip().upper()}|{str(symbol or '').strip().upper()}|{str(timeframe or '').strip().upper()}"
 
@@ -70,6 +136,7 @@ def analyze():
         language = data.get('language', 'en-US')
         model = data.get('model')
         timeframe = data.get('timeframe', '1D')
+        async_submit = bool(data.get('async_submit', False))
         
         if not market or not symbol:
             return jsonify({
@@ -134,6 +201,45 @@ def analyze():
             logger.warning(f"Billing check failed (skipped): {e}", exc_info=True)
         
         service = get_fast_analysis_service()
+
+        # Async submit mode: record "processing" immediately and return task id.
+        if async_submit:
+            memory = get_analysis_memory()
+            pending_id = memory.create_pending_task(
+                market=market,
+                symbol=symbol,
+                language=language,
+                model=model or "",
+                timeframe=timeframe,
+                user_id=user_id
+            )
+            if not pending_id:
+                return jsonify({'code': 0, 'msg': 'Failed to create analysis task', 'data': None}), 500
+
+            t = threading.Thread(
+                target=_run_async_analysis_task,
+                args=(int(pending_id), market, symbol, language, model, timeframe, int(user_id), inflight_key, int(credits_charged or 0)),
+                daemon=True
+            )
+            t.start()
+            # worker owns inflight release
+            inflight_key = None
+
+            return jsonify({
+                'code': 1,
+                'msg': 'submitted',
+                'data': {
+                    'task_id': int(pending_id),
+                    'memory_id': int(pending_id),
+                    'status': 'processing',
+                    'market': market,
+                    'symbol': symbol,
+                    'timeframe': timeframe,
+                    'credits_charged': credits_charged,
+                    'remaining_credits': remaining_credits,
+                }
+            })
+
         result = service.analyze(
             market=market,
             symbol=symbol,

@@ -250,20 +250,17 @@ def add_position():
         
         with get_db_connection() as db:
             cur = db.cursor()
+            # Delete any existing positions for this symbol (regardless of side),
+            # ensuring only one position per symbol per user per group.
+            cur.execute(
+                "DELETE FROM qd_manual_positions WHERE user_id = ? AND market = ? AND symbol = ? AND group_name = ?",
+                (user_id, market, symbol, group_name)
+            )
             cur.execute(
                 """
                 INSERT INTO qd_manual_positions 
                 (user_id, market, symbol, name, side, quantity, entry_price, entry_time, notes, tags, group_name, created_at, updated_at)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())
-                ON CONFLICT(user_id, market, symbol, side, group_name) DO UPDATE SET
-                    name = excluded.name,
-                    quantity = excluded.quantity,
-                    entry_price = excluded.entry_price,
-                    entry_time = excluded.entry_time,
-                    notes = excluded.notes,
-                    tags = excluded.tags,
-                    group_name = excluded.group_name,
-                    updated_at = NOW()
                 """,
                 (user_id, market, symbol, name, side, quantity, entry_price, entry_time, notes, tags_json, group_name)
             )
@@ -557,8 +554,8 @@ def add_monitor():
         if monitor_type not in ('ai', 'price_alert', 'pnl_alert'):
             monitor_type = 'ai'
         
-        # Calculate next_run_at based on interval
-        interval_minutes = int(config.get('interval_minutes') or 60)
+        # Calculate next_run_at based on interval (frontend sends run_interval_minutes)
+        interval_minutes = int(config.get('run_interval_minutes') or config.get('interval_minutes') or 60)
         
         position_ids_json = json.dumps(position_ids if isinstance(position_ids, list) else [], ensure_ascii=False)
         config_json = json.dumps(config if isinstance(config, dict) else {}, ensure_ascii=False)
@@ -616,8 +613,8 @@ def update_monitor(monitor_id):
             updates.append('config = ?')
             params.append(json.dumps(config if isinstance(config, dict) else {}, ensure_ascii=False))
             
-            # Recalculate next_run_at if interval changed (handled separately for PostgreSQL)
-            next_run_interval = int(config.get('interval_minutes') or 60)
+            # Recalculate next_run_at if interval changed
+            next_run_interval = int(config.get('run_interval_minutes') or config.get('interval_minutes') or 60)
         
         if 'notification_config' in data:
             notification_config = data.get('notification_config') or {}

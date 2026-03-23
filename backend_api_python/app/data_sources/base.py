@@ -4,7 +4,7 @@
 """
 from abc import ABC, abstractmethod
 from typing import Dict, List, Any, Optional
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 from app.utils.logger import get_logger
 
@@ -136,19 +136,35 @@ class BaseDataSource(ABC):
         klines: List[Dict[str, Any]],
         timeframe: str
     ):
-        """记录获取结果日志"""
+        """记录获取结果日志。
+
+        延迟判断：
+        - K 线 time 为 Unix 秒（UTC），与 datetime.now(UTC) 比较，避免本地时区误差。
+        - 日线/周线：最后一根通常是「上一交易日收盘」，周末/节假日可达 3～4 天，
+          原先用 2×86400s（48h）会在周一早盘误报；改为日线最多容忍约 5 个自然日，周线更宽。
+        """
         if klines:
-            latest_time = datetime.fromtimestamp(klines[-1]['time'])
-            time_diff = (datetime.now() - latest_time).total_seconds()
-            # logger.info(
-            #     f"{self.name}: {symbol} 获取 {len(klines)} 条数据, "
-            #     f"最新时间: {latest_time}, 延迟: {time_diff:.0f}秒"
-            # )
-            
-            # 检查数据是否过旧
-            max_diff = TIMEFRAME_SECONDS.get(timeframe, 3600) * 2
+            latest_ts = int(klines[-1]["time"])
+            latest_utc = datetime.fromtimestamp(latest_ts, tz=timezone.utc)
+            now_utc = datetime.now(timezone.utc)
+            time_diff = (now_utc - latest_utc).total_seconds()
+
+            tf_sec = TIMEFRAME_SECONDS.get(timeframe, 3600)
+            if tf_sec < 86400:
+                # 分钟/小时级：超过约 2 根 K 未更新则告警
+                max_diff = tf_sec * 2
+            elif tf_sec == 86400:
+                # 日线：覆盖周末 + 短假期（约 5 个自然日）
+                max_diff = 5 * 86400
+            else:
+                # 周线：允许跨多周数据滞后
+                max_diff = max(tf_sec * 2, 21 * 86400)
+
             if time_diff > max_diff:
-                logger.warning(f"Warning: {symbol} data is delayed ({time_diff:.0f}s)")
+                logger.warning(
+                    f"Warning: {symbol} data is delayed ({time_diff:.0f}s, "
+                    f"latest_bar_utc={latest_utc.isoformat()}, threshold={max_diff:.0f}s, tf={timeframe})"
+                )
         else:
             logger.warning(f"{self.name}: no data for {symbol}")
 

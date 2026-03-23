@@ -67,6 +67,9 @@ class AnalysisMemory:
                         consensus_abs DECIMAL(24, 8),
                         agreement_ratio DECIMAL(10, 6),
                         quality_multiplier DECIMAL(10, 6),
+                        task_status VARCHAR(20) DEFAULT 'completed',
+                        task_error TEXT,
+                        updated_at TIMESTAMP DEFAULT NOW(),
                         created_at TIMESTAMP DEFAULT NOW(),
                         validated_at TIMESTAMP,
                         actual_outcome VARCHAR(20),
@@ -123,6 +126,27 @@ class AnalysisMemory:
                             WHERE table_name = 'qd_analysis_memory' AND column_name = 'quality_multiplier'
                         ) THEN
                             ALTER TABLE qd_analysis_memory ADD COLUMN quality_multiplier DECIMAL(10, 6);
+                        END IF;
+
+                        IF NOT EXISTS (
+                            SELECT 1 FROM information_schema.columns
+                            WHERE table_name = 'qd_analysis_memory' AND column_name = 'task_status'
+                        ) THEN
+                            ALTER TABLE qd_analysis_memory ADD COLUMN task_status VARCHAR(20) DEFAULT 'completed';
+                        END IF;
+
+                        IF NOT EXISTS (
+                            SELECT 1 FROM information_schema.columns
+                            WHERE table_name = 'qd_analysis_memory' AND column_name = 'task_error'
+                        ) THEN
+                            ALTER TABLE qd_analysis_memory ADD COLUMN task_error TEXT;
+                        END IF;
+
+                        IF NOT EXISTS (
+                            SELECT 1 FROM information_schema.columns
+                            WHERE table_name = 'qd_analysis_memory' AND column_name = 'updated_at'
+                        ) THEN
+                            ALTER TABLE qd_analysis_memory ADD COLUMN updated_at TIMESTAMP DEFAULT NOW();
                         END IF;
                     END $$;
                 """)
@@ -185,14 +209,16 @@ class AnalysisMemory:
                     INSERT INTO qd_analysis_memory (
                         user_id, market, symbol, decision, confidence,
                         price_at_analysis, summary, reasons, scores, indicators_snapshot, raw_result,
-                        consensus_score, consensus_abs, agreement_ratio, quality_multiplier
+                        consensus_score, consensus_abs, agreement_ratio, quality_multiplier,
+                        task_status, task_error, updated_at
                     ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
-                              %s, %s, %s, %s)
+                              %s, %s, %s, %s, %s, %s, NOW())
                     RETURNING id
                 """, (
                     user_id, market, symbol, decision, confidence,
                     price, summary, reasons, scores, indicators, raw,
                     consensus_score, consensus_abs, agreement_ratio, quality_multiplier,
+                    "completed", "",
                 ))
                 
                 # 使用 lastrowid 属性获取 ID（execute 内部已经处理了 RETURNING）
@@ -227,7 +253,8 @@ class AnalysisMemory:
                     SELECT 
                         id, decision, confidence, price_at_analysis,
                         summary, reasons, scores,
-                        created_at, validated_at, was_correct, actual_return_pct
+                        created_at, validated_at, was_correct, actual_return_pct,
+                        task_status, task_error, updated_at
                     FROM qd_analysis_memory
                     WHERE market = %s AND symbol = %s
                     AND created_at > NOW() - INTERVAL '{int(days)} days'
@@ -248,7 +275,10 @@ class AnalysisMemory:
                         "summary": row['summary'],
                         "reasons": _safe_json_parse(row['reasons'], []),
                         "scores": _safe_json_parse(row['scores'], {}),
+                        "status": row.get('task_status') or 'completed',
+                        "error_message": row.get('task_error') or '',
                         "created_at": row['created_at'].isoformat() if row['created_at'] else None,
+                        "updated_at": row['updated_at'].isoformat() if row.get('updated_at') else None,
                         "was_correct": row['was_correct'],
                         "actual_return_pct": float(row['actual_return_pct']) if row['actual_return_pct'] else None,
                     })
@@ -292,7 +322,8 @@ class AnalysisMemory:
                     SELECT 
                         id, market, symbol, decision, confidence, price_at_analysis,
                         summary, reasons, scores, indicators_snapshot, raw_result,
-                        created_at, validated_at, was_correct, actual_return_pct
+                        created_at, validated_at, was_correct, actual_return_pct,
+                        task_status, task_error, updated_at
                     FROM qd_analysis_memory
                     {where_clause}
                     ORDER BY created_at DESC
@@ -316,7 +347,10 @@ class AnalysisMemory:
                         "scores": _safe_json_parse(row['scores'], {}),
                         "indicators": _safe_json_parse(row['indicators_snapshot'], {}),
                         "full_result": _safe_json_parse(row['raw_result'], None),
+                        "status": row.get('task_status') or 'completed',
+                        "error_message": row.get('task_error') or '',
                         "created_at": row['created_at'].isoformat() if row['created_at'] else None,
+                        "updated_at": row['updated_at'].isoformat() if row.get('updated_at') else None,
                         "was_correct": row['was_correct'],
                         "actual_return_pct": float(row['actual_return_pct']) if row['actual_return_pct'] else None,
                     })
@@ -358,27 +392,143 @@ class AnalysisMemory:
         except Exception as e:
             logger.error(f"Failed to delete memory {memory_id}: {e}")
             return False
+
+    def create_pending_task(self, market: str, symbol: str, language: str, model: str, timeframe: str,
+                            user_id: int = None) -> Optional[int]:
+        """Create a processing record in history before long-running analysis starts."""
+        try:
+            with get_db_connection() as db:
+                cur = db.cursor()
+                summary = f"Analysis submitted ({timeframe})..."
+                reasons = json.dumps([])
+                scores = json.dumps({})
+                indicators = json.dumps({})
+                raw = json.dumps({
+                    "market": market,
+                    "symbol": symbol,
+                    "language": language,
+                    "model": model,
+                    "timeframe": timeframe,
+                    "task_status": "processing",
+                })
+                cur.execute("""
+                    INSERT INTO qd_analysis_memory (
+                        user_id, market, symbol, decision, confidence,
+                        summary, reasons, scores, indicators_snapshot, raw_result,
+                        task_status, task_error, updated_at, created_at
+                    ) VALUES (%s, %s, %s, %s, %s,
+                              %s, %s, %s, %s, %s,
+                              %s, %s, NOW(), NOW())
+                    RETURNING id
+                """, (
+                    user_id, market, symbol, "HOLD", 0,
+                    summary, reasons, scores, indicators, raw,
+                    "processing", "",
+                ))
+                # PostgresCursor.execute() 会在 INSERT 时提前 fetchone() 消耗 RETURNING 结果，
+                # 所以这里不要再 cur.fetchone()，直接取 lastrowid。
+                memory_id = cur.lastrowid
+                db.commit()
+                cur.close()
+                return memory_id
+        except Exception as e:
+            logger.error(f"Failed to create pending task: {e}")
+            return None
+
+    def finalize_pending_task(self, memory_id: int, result: Dict[str, Any]) -> bool:
+        """Overwrite pending record with final analysis result."""
+        try:
+            consensus = result.get("consensus") or {}
+            with get_db_connection() as db:
+                cur = db.cursor()
+                cur.execute("""
+                    UPDATE qd_analysis_memory
+                    SET decision = %s,
+                        confidence = %s,
+                        price_at_analysis = %s,
+                        summary = %s,
+                        reasons = %s,
+                        scores = %s,
+                        indicators_snapshot = %s,
+                        raw_result = %s,
+                        consensus_score = %s,
+                        consensus_abs = %s,
+                        agreement_ratio = %s,
+                        quality_multiplier = %s,
+                        task_status = %s,
+                        task_error = %s,
+                        updated_at = NOW()
+                    WHERE id = %s
+                """, (
+                    result.get("decision"),
+                    result.get("confidence"),
+                    result.get("market_data", {}).get("current_price"),
+                    result.get("summary"),
+                    json.dumps(result.get("reasons", [])),
+                    json.dumps(result.get("scores", {})),
+                    json.dumps(result.get("indicators", {})),
+                    json.dumps(result),
+                    consensus.get("consensus_score"),
+                    consensus.get("consensus_abs"),
+                    consensus.get("agreement_ratio"),
+                    consensus.get("quality_multiplier"),
+                    "completed" if not result.get("error") else "failed",
+                    str(result.get("error") or ""),
+                    int(memory_id),
+                ))
+                ok = cur.rowcount > 0
+                db.commit()
+                cur.close()
+                return ok
+        except Exception as e:
+            logger.error(f"Failed to finalize pending task {memory_id}: {e}")
+            return False
+
+    def fail_pending_task(self, memory_id: int, error_message: str) -> bool:
+        """Mark pending task as failed."""
+        try:
+            with get_db_connection() as db:
+                cur = db.cursor()
+                cur.execute("""
+                    UPDATE qd_analysis_memory
+                    SET task_status = 'failed',
+                        task_error = %s,
+                        summary = %s,
+                        updated_at = NOW()
+                    WHERE id = %s
+                """, (
+                    str(error_message or "analysis failed"),
+                    f"Analysis failed: {str(error_message or '')}",
+                    int(memory_id),
+                ))
+                ok = cur.rowcount > 0
+                db.commit()
+                cur.close()
+                return ok
+        except Exception as e:
+            logger.error(f"Failed to mark task failed {memory_id}: {e}")
+            return False
     
     def get_similar_patterns(self, market: str, symbol: str, 
                              current_indicators: Dict, limit: int = 3) -> List[Dict]:
         """
         Find historical analyses with similar technical patterns.
         
-        This is a simplified version - can be enhanced with vector similarity later.
-        Currently matches based on:
-        - Same symbol
-        - Similar RSI range (±10)
-        - Same MACD signal direction
-        - Validated outcomes preferred
+        Multi-indicator weighted similarity:
+        - RSI: ±15 range, weighted 0.3
+        - MACD signal: exact match, weighted 0.3
+        - MA trend: exact match, weighted 0.25
+        - Volatility level: similar band, weighted 0.15
+        - Time decay: prefer recent validated outcomes
         """
         try:
-            rsi = current_indicators.get("rsi", {}).get("value", 50)
-            macd_signal = current_indicators.get("macd", {}).get("signal", "neutral")
+            rsi = float(current_indicators.get("rsi", {}).get("value") or 50)
+            macd_signal = str(current_indicators.get("macd", {}).get("signal") or "neutral").lower()
+            ma_trend = str(current_indicators.get("moving_averages", {}).get("trend") or "sideways").lower()
+            vol_level = str(current_indicators.get("volatility", {}).get("level") or "normal").lower()
             
             with get_db_connection() as db:
                 cur = db.cursor()
-                
-                # Simple pattern matching query
                 cur.execute("""
                     SELECT 
                         id, decision, confidence, price_at_analysis,
@@ -388,49 +538,50 @@ class AnalysisMemory:
                     WHERE market = %s AND symbol = %s
                     AND validated_at IS NOT NULL
                     AND was_correct IS NOT NULL
-                    ORDER BY 
-                        CASE WHEN was_correct = true THEN 0 ELSE 1 END,
-                        created_at DESC
+                    ORDER BY validated_at DESC NULLS LAST, created_at DESC
                     LIMIT %s
-                """, (market, symbol, limit * 2))  # Get more for filtering
+                """, (market, symbol, limit * 5))
                 
                 rows = cur.fetchall() or []
                 cur.close()
                 
-                results = []
+                scored = []
                 for row in rows:
-                    indicators = _safe_json_parse(row['indicators_snapshot'], {})
-                    hist_rsi = indicators.get("rsi", {}).get("value", 50)
-                    hist_macd = indicators.get("macd", {}).get("signal", "neutral")
+                    ind = _safe_json_parse(row['indicators_snapshot'], {})
+                    hist_rsi = float(ind.get("rsi", {}).get("value") or 50)
+                    hist_macd = str(ind.get("macd", {}).get("signal") or "neutral").lower()
+                    hist_ma = str(ind.get("moving_averages", {}).get("trend") or "sideways").lower()
+                    hist_vol = str(ind.get("volatility", {}).get("level") or "normal").lower()
                     
-                    # Simple similarity check
-                    rsi_similar = abs(hist_rsi - rsi) <= 15
-                    macd_similar = hist_macd == macd_signal
+                    rsi_diff = abs(hist_rsi - rsi)
+                    rsi_score = max(0, 1 - rsi_diff / 30) * 0.3
+                    macd_score = 0.3 if hist_macd == macd_signal else 0
+                    ma_score = 0.25 if hist_ma == ma_trend else 0
+                    vol_score = 0.15 if hist_vol == vol_level else (0.08 if _vol_bands_similar(vol_level, hist_vol) else 0)
                     
-                    if rsi_similar or macd_similar:
-                        results.append({
-                            "id": row['id'],
-                            "decision": row['decision'],
-                            "confidence": row['confidence'],
-                            "price": float(row['price_at_analysis']) if row['price_at_analysis'] else None,
-                            "summary": row['summary'],
-                            "was_correct": row['was_correct'],
-                            "actual_return_pct": float(row['actual_return_pct']) if row['actual_return_pct'] else None,
-                            "similarity": {
-                                "rsi_match": rsi_similar,
-                                "macd_match": macd_similar,
-                            }
-                        })
-                        
-                        if len(results) >= limit:
-                            break
+                    sim = rsi_score + macd_score + ma_score + vol_score
+                    if sim < 0.25:
+                        continue
+                    
+                    bonus = 0.1 if row['was_correct'] else 0
+                    scored.append((sim + bonus, {
+                        "id": row['id'],
+                        "decision": row['decision'],
+                        "confidence": row['confidence'],
+                        "price": float(row['price_at_analysis']) if row['price_at_analysis'] else None,
+                        "summary": row['summary'],
+                        "was_correct": row['was_correct'],
+                        "actual_return_pct": float(row['actual_return_pct']) if row['actual_return_pct'] else None,
+                        "similarity_score": round(sim + bonus, 3),
+                    }))
                 
-                return results
+                scored.sort(key=lambda x: -x[0])
+                return [p[1] for p in scored[:limit]]
                 
         except Exception as e:
             logger.error(f"Failed to get similar patterns: {e}")
             return []
-    
+
     def record_feedback(self, memory_id: int, feedback: str) -> bool:
         """
         Record user feedback on an analysis.
@@ -493,8 +644,8 @@ class AnalysisMemory:
                 
                 for row in rows:
                     try:
-                        # Get current price using MarketDataCollector
-                        current_price = collector._get_price(row['market'], row['symbol'])
+                        price_data = collector._get_price(row['market'], row['symbol'])
+                        current_price = float(price_data.get('price', 0)) if price_data else None
                         if not current_price or current_price <= 0:
                             continue
                         analysis_price = float(row['price_at_analysis'])
@@ -580,7 +731,8 @@ class AnalysisMemory:
 
                 for row in rows:
                     try:
-                        current_price = collector._get_price(row["market"], row["symbol"])
+                        price_data = collector._get_price(row["market"], row["symbol"])
+                        current_price = float(price_data.get("price", 0)) if price_data else None
                         if not current_price or current_price <= 0:
                             continue
                         analysis_price = float(row.get("price_at_analysis") or 0.0)
@@ -625,6 +777,74 @@ class AnalysisMemory:
 
         return stats
     
+    def get_confidence_accuracy_by_bucket(
+        self, market: str = None, symbol: str = None, days: int = 90
+    ) -> Dict[str, float]:
+        """
+        Compute actual accuracy by confidence bucket for calibration.
+        Buckets: (50,60), (60,70), (70,80), (80,90), (90,100).
+        Returns e.g. {"60_70": 0.58, "70_80": 0.62} - bucket_key -> accuracy.
+        """
+        try:
+            with get_db_connection() as db:
+                cur = db.cursor()
+                where = ["validated_at IS NOT NULL", "was_correct IS NOT NULL", "confidence IS NOT NULL"]
+                params = []
+                if market:
+                    where.append("market = %s")
+                    params.append(market)
+                if symbol:
+                    where.append("symbol = %s")
+                    params.append(symbol)
+                where.append(f"created_at > NOW() - INTERVAL '{int(days)} days'")
+                params = tuple(params) if params else ()
+                cur.execute(f"""
+                    SELECT confidence, was_correct
+                    FROM qd_analysis_memory
+                    WHERE {' AND '.join(where)}
+                """, params)
+                rows = cur.fetchall() or []
+                cur.close()
+
+            buckets = [(50, 60), (60, 70), (70, 80), (80, 90), (90, 101)]
+            out = {}
+            for lo, hi in buckets:
+                subset = [r for r in rows if lo <= (r.get("confidence") or 0) < hi]
+                if len(subset) < 5:
+                    continue
+                correct = sum(1 for r in subset if r.get("was_correct"))
+                out[f"{lo}_{hi}"] = correct / len(subset)
+            return out
+        except Exception as e:
+            logger.warning(f"get_confidence_accuracy_by_bucket failed: {e}")
+            return {}
+
+    def get_adjusted_confidence(
+        self, raw_confidence: int, market: str = None, symbol: str = None
+    ) -> int:
+        """
+        Adjust confidence based on historical accuracy in that bucket.
+        If model is overconfident (low actual accuracy), dampen. Underconfident -> boost slightly.
+        """
+        buckets = [(50, 60, "50_60"), (60, 70, "60_70"), (70, 80, "70_80"), (80, 90, "80_90"), (90, 101, "90_100")]
+        bucket_key = None
+        for lo, hi, key in buckets:
+            if lo <= raw_confidence < hi:
+                bucket_key = key
+                break
+        if not bucket_key:
+            return max(1, min(99, int(raw_confidence)))
+        acc_map = self.get_confidence_accuracy_by_bucket(market=market, symbol=symbol)
+        acc = acc_map.get(bucket_key)
+        if acc is None or acc <= 0:
+            return max(1, min(99, int(raw_confidence)))
+        expected = 0.5 + (raw_confidence - 50) / 100
+        if expected <= 0:
+            return raw_confidence
+        factor = acc / expected
+        adjusted = int(raw_confidence * factor)
+        return max(1, min(99, adjusted))
+
     def get_performance_stats(self, market: str = None, symbol: str = None, 
                               days: int = 30) -> Dict[str, Any]:
         """
@@ -703,6 +923,18 @@ class AnalysisMemory:
                 "accuracy_pct": 0,
                 "error": str(e),
             }
+
+
+def _vol_bands_similar(a: str, b: str) -> bool:
+    """Check if two volatility levels are in similar band."""
+    low = {"low", "normal", "normal_low"}
+    high = {"high", "elevated", "volatile", "very_high"}
+    a, b = a.lower(), b.lower()
+    if a in low and b in low:
+        return True
+    if a in high and b in high:
+        return True
+    return False
 
 
 # Singleton

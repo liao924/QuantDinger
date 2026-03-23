@@ -424,12 +424,37 @@ def _fetch_commodities() -> List[Dict[str, Any]]:
                             "category": "commodity"
                         })
                     elif len(hist) == 1:
+                        current = _safe_float(hist["Close"].iloc[-1], 0)
+                        change = 0.0
+                        # Fallback: some futures symbols only return one row in short history windows.
+                        try:
+                            fast_info = getattr(ticker, "fast_info", {}) or {}
+                            prev_close = _safe_float(fast_info.get("previousClose"), 0)
+                            if prev_close > 0 and current > 0:
+                                change = ((current - prev_close) / prev_close) * 100
+                        except Exception:
+                            pass
+                        if change == 0.0:
+                            try:
+                                info = getattr(ticker, "info", {}) or {}
+                                # yfinance may expose either regularMarketChangePercent (ratio)
+                                # or regularMarketChange (absolute). Prefer percent when present.
+                                rcp = info.get("regularMarketChangePercent")
+                                if rcp is not None:
+                                    change = _safe_float(rcp, 0) * 100
+                                else:
+                                    rmc = _safe_float(info.get("regularMarketChange"), 0)
+                                    prev_close = _safe_float(info.get("regularMarketPreviousClose"), 0)
+                                    if prev_close > 0:
+                                        change = (rmc / prev_close) * 100
+                            except Exception:
+                                pass
                         result.append({
                             "symbol": commodity["symbol"],
                             "name_cn": commodity["name_cn"],
                             "name_en": commodity["name_en"],
-                            "price": round(hist["Close"].iloc[-1], 2),
-                            "change": 0,
+                            "price": round(current, 2),
+                            "change": round(change, 2),
                             "unit": commodity["unit"],
                             "category": "commodity"
                         })

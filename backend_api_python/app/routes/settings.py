@@ -5,10 +5,12 @@ Admin-only endpoints for system configuration management.
 """
 import os
 import re
+import importlib
 from flask import Blueprint, request, jsonify
 from app.utils.logger import get_logger
 from app.utils.config_loader import clear_config_cache
 from app.utils.auth import login_required, admin_required
+from dotenv import load_dotenv
 
 logger = get_logger(__name__)
 
@@ -16,6 +18,55 @@ settings_bp = Blueprint('settings', __name__)
 
 # .env 文件路径
 ENV_FILE_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), '.env')
+
+
+def _reload_runtime_env() -> None:
+    """
+    Reload .env into current process so settings take effect immediately.
+    Priority keeps backend_api_python/.env over repo-root/.env.
+    """
+    backend_dir = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
+    root_dir = os.path.dirname(backend_dir)
+
+    # Load root first, then backend .env to keep backend file higher priority
+    load_dotenv(os.path.join(root_dir, '.env'), override=True)
+    load_dotenv(os.path.join(backend_dir, '.env'), override=True)
+
+
+def _refresh_runtime_services() -> None:
+    """
+    Reset singleton services so new env/config is picked up lazily
+    on next request without restarting the Python process.
+    """
+    # Prefer dedicated reset function where available.
+    try:
+        search_mod = importlib.import_module('app.services.search')
+        if hasattr(search_mod, 'reset_search_service'):
+            search_mod.reset_search_service()
+    except Exception as e:
+        logger.warning(f"reset_search_service skipped: {e}")
+
+    # Generic singleton fields used across services.
+    singleton_fields = [
+        ('app.services.fast_analysis', '_fast_analysis_service'),
+        ('app.services.billing_service', '_billing_service'),
+        ('app.services.security_service', '_security_service'),
+        ('app.services.oauth_service', '_oauth_service'),
+        ('app.services.user_service', '_user_service'),
+        ('app.services.email_service', '_email_service'),
+        ('app.services.community_service', '_community_service'),
+        ('app.services.usdt_payment_service', '_svc'),
+        ('app.services.usdt_payment_service', '_worker'),
+        ('app.services.analysis_memory', '_memory_instance'),
+    ]
+
+    for module_name, field_name in singleton_fields:
+        try:
+            mod = importlib.import_module(module_name)
+            if hasattr(mod, field_name):
+                setattr(mod, field_name, None)
+        except Exception as e:
+            logger.warning(f"Singleton reset skipped: {module_name}.{field_name}: {e}")
 
 # 配置项定义（分组）- 按功能模块划分，每个配置项包含描述
 # ---------------------------------------------------------------
@@ -440,18 +491,74 @@ CONFIG_SCHEMA = {
         'order': 7,
         'items': [
             {
-                'key': 'ENABLE_AGENT_MEMORY',
-                'label': 'Enable Agent Memory',
-                'type': 'boolean',
-                'default': 'True',
-                'description': 'Enable AI agent memory for learning from past trades'
-            },
-            {
                 'key': 'ENABLE_REFLECTION_WORKER',
                 'label': 'Enable Auto Reflection',
                 'type': 'boolean',
                 'default': 'False',
-                'description': 'Enable background worker for automatic trade reflection'
+                'description': 'Enable background worker for automatic trade reflection and calibration'
+            },
+            {
+                'key': 'REFLECTION_WORKER_INTERVAL_SEC',
+                'label': 'Reflection Interval (sec)',
+                'type': 'number',
+                'default': '86400',
+                'description': 'Reflection worker run interval in seconds (86400 = 1 day)'
+            },
+            {
+                'key': 'REFLECTION_MIN_AGE_DAYS',
+                'label': 'Min Age for Validation (days)',
+                'type': 'number',
+                'default': '7',
+                'description': 'Only validate analyses older than N days'
+            },
+            {
+                'key': 'REFLECTION_VALIDATE_LIMIT',
+                'label': 'Validation Batch Limit',
+                'type': 'number',
+                'default': '200',
+                'description': 'Max records to validate per reflection cycle'
+            },
+            {
+                'key': 'ENABLE_CONFIDENCE_CALIBRATION',
+                'label': 'Enable Confidence Calibration',
+                'type': 'boolean',
+                'default': 'False',
+                'description': 'Adjust confidence by historical accuracy in each bucket'
+            },
+            {
+                'key': 'ENABLE_AI_ENSEMBLE',
+                'label': 'Enable Multi-Model Voting',
+                'type': 'boolean',
+                'default': 'False',
+                'description': 'Use 2-3 models and majority vote for more stable decisions'
+            },
+            {
+                'key': 'AI_ENSEMBLE_MODELS',
+                'label': 'Ensemble Models',
+                'type': 'text',
+                'default': 'openai/gpt-4o,openai/gpt-4o-mini',
+                'description': 'Comma-separated model IDs for ensemble voting'
+            },
+            {
+                'key': 'AI_CALIBRATION_MARKETS',
+                'label': 'Calibration Markets',
+                'type': 'text',
+                'default': 'Crypto',
+                'description': 'Comma-separated markets to run threshold calibration'
+            },
+            {
+                'key': 'AI_CALIBRATION_LOOKBACK_DAYS',
+                'label': 'Calibration Lookback (days)',
+                'type': 'number',
+                'default': '30',
+                'description': 'Days of validated data for calibration'
+            },
+            {
+                'key': 'AI_CALIBRATION_MIN_SAMPLES',
+                'label': 'Calibration Min Samples',
+                'type': 'number',
+                'default': '80',
+                'description': 'Minimum validated samples required for calibration'
             },
         ]
     },
@@ -661,31 +768,17 @@ CONFIG_SCHEMA = {
             },
             {
                 'key': 'BILLING_COST_AI_ANALYSIS',
-                'label': 'AI Analysis Cost',
+                'label': 'AI Analysis Cost (per symbol)',
                 'type': 'number',
                 'default': '10',
-                'description': 'Credits per AI analysis request'
+                'description': 'Credits per symbol (instant analysis, AI filter, scheduled tasks all use this price)'
             },
             {
-                'key': 'BILLING_COST_STRATEGY_RUN',
-                'label': 'Strategy Run Cost',
+                'key': 'BILLING_COST_AI_CODE_GEN',
+                'label': 'AI Code Generation Cost',
                 'type': 'number',
-                'default': '5',
-                'description': 'Credits per strategy start'
-            },
-            {
-                'key': 'BILLING_COST_BACKTEST',
-                'label': 'Backtest Cost',
-                'type': 'number',
-                'default': '3',
-                'description': 'Credits per backtest run'
-            },
-            {
-                'key': 'BILLING_COST_PORTFOLIO_MONITOR',
-                'label': 'Portfolio Monitor Cost',
-                'type': 'number',
-                'default': '8',
-                'description': 'Credits per portfolio AI monitoring run'
+                'default': '30',
+                'description': 'Credits per AI strategy/indicator code generation (higher token usage)'
             },
             {
                 'key': 'CREDITS_REGISTER_BONUS',
@@ -873,13 +966,19 @@ def save_settings():
         if write_env_file(current_env):
             # 清除配置缓存
             clear_config_cache()
+            # 热重载运行时环境变量（无需重启进程）
+            _reload_runtime_env()
+            # 重置依赖配置的服务单例（下次请求自动按新配置重建）
+            _refresh_runtime_services()
             
             return jsonify({
                 'code': 1,
                 'msg': 'Settings saved successfully',
                 'data': {
                     'updated_keys': list(updates.keys()),
-                    'requires_restart': True  # 标记需要重启
+                    'requires_restart': False,
+                    'hot_reloaded': True,
+                    'services_refreshed': True
                 }
             })
         else:

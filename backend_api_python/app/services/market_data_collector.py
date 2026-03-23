@@ -281,14 +281,12 @@ class MarketDataCollector:
         """
         计算技术指标 (本地计算，无外部依赖)
         
-        返回格式符合前端 FastAnalysisReport.vue 的期望：
-        {
-            rsi: { value, signal },
-            macd: { signal, trend },
-            moving_averages: { ma5, ma10, ma20, trend },
-            levels: { support, resistance },
-            volatility: { level, pct }
-        }
+        返回格式符合前端 FastAnalysisReport.vue 的期望。
+        口径说明（与常见行情终端对齐）：
+        - RSI(14)：Wilder 平滑（首段均幅为前 14 期简单平均，其后递推）。
+        - MACD：收盘 EMA12/EMA26（首值=前 N 日 SMA），信号线=MACD 的 EMA9（SMA 种子）。
+        - MA：SMA。枢轴：上一根 K 的 H/L/C。摆动高低：近 20 根 H/L 窗口极值。
+        - 布林：20 收盘 SMA ± 2×总体标准差。ATR(14)：Wilder（首 ATR=前 14 期 TR 简单平均，其后递推）。
         """
         if not klines or len(klines) < 5:
             return {}
@@ -319,8 +317,8 @@ class MarketDataCollector:
                     'signal': rsi_signal,
                 }
             
-            # ========== MACD ==========
-            if len(closes) >= 26:
+            # ========== MACD（SMA 种子 EMA，与常见终端一致）==========
+            if len(closes) >= 34:
                 macd_raw = self._calc_macd(closes)
                 macd_val = macd_raw.get('MACD', 0)
                 macd_sig = macd_raw.get('MACD_signal', 0)
@@ -366,6 +364,11 @@ class MarketDataCollector:
                 'ma20': round(ma20, 6),
                 'trend': ma_trend,
             }
+
+            # 先算布林带，供下方合成支撑/阻力使用（键名 BB_upper / BB_lower）
+            bb_for_levels: Dict[str, Any] = {}
+            if len(closes) >= 20:
+                bb_for_levels = self._calc_bollinger(closes, 20, 2) or {}
             
             # ========== 支撑/阻力位 (多种方法综合) ==========
             # 方法1: 枢轴点 (Pivot Points) - 使用前一日数据
@@ -390,13 +393,13 @@ class MarketDataCollector:
             swing_high = max(recent_highs) if recent_highs else current_price * 1.05
             swing_low = min(recent_lows) if recent_lows else current_price * 0.95
             
-            # 方法3: 布林带中轨上下 (如果有)
-            bb_upper = indicators.get('bollinger', {}).get('upper', swing_high)
-            bb_lower = indicators.get('bollinger', {}).get('lower', swing_low)
+            # 方法3: 布林上下轨（与 _calc_bollinger 返回字段一致）
+            bb_upper = bb_for_levels.get('BB_upper', swing_high)
+            bb_lower = bb_for_levels.get('BB_lower', swing_low)
             
             # 综合取值: 取多种方法的平均/加权
-            resistance = round((r1 + swing_high + bb_upper) / 3, 6) if bb_upper else round((r1 + swing_high) / 2, 6)
-            support = round((s1 + swing_low + bb_lower) / 3, 6) if bb_lower else round((s1 + swing_low) / 2, 6)
+            resistance = round((r1 + swing_high + bb_upper) / 3, 6)
+            support = round((s1 + swing_low + bb_lower) / 3, 6)
             
             indicators['levels'] = {
                 'support': support,
@@ -411,20 +414,10 @@ class MarketDataCollector:
                 'method': 'pivot_swing_bb_avg'  # 标注计算方法
             }
             
-            # ========== ATR 和波动率 ==========
-            atr = 0
+            # ========== ATR 和波动率（Wilder ATR，全序列递推至最新一根）==========
+            atr = 0.0
             if len(klines) >= 14:
-                # 真实波动幅度 ATR (True Range)
-                true_ranges = []
-                for i in range(-14, 0):
-                    h = float(klines[i].get('high', 0))
-                    l = float(klines[i].get('low', 0))
-                    prev_c = float(klines[i-1].get('close', 0)) if i > -14 else h
-                    if h > 0 and l > 0:
-                        tr = max(h - l, abs(h - prev_c), abs(l - prev_c))
-                        true_ranges.append(tr)
-                
-                atr = sum(true_ranges) / len(true_ranges) if true_ranges else 0
+                atr = float(self._calc_atr_wilder(klines, period=14))
                 volatility_pct = (atr / current_price * 100) if current_price > 0 else 0
                 
                 if volatility_pct > 5:
@@ -468,10 +461,9 @@ class MarketDataCollector:
                 'method': 'atr_support_resistance'
             }
             
-            # ========== 布林带 (附加) ==========
-            if len(closes) >= 20:
-                bb_data = self._calc_bollinger(closes, 20, 2)
-                indicators['bollinger'] = bb_data
+            # ========== 布林带 (附加，与 bb_for_levels 同一次计算) ==========
+            if bb_for_levels:
+                indicators['bollinger'] = bb_for_levels
             
             # ========== 成交量 (附加) ==========
             if len(volumes) >= 20:
@@ -498,48 +490,109 @@ class MarketDataCollector:
             return {}
     
     def _calc_rsi(self, closes: List[float], period: int = 14) -> float:
-        """计算RSI"""
+        """Wilder RSI：首段均幅为前 period 期涨跌简单平均，之后按 Wilder 平滑递推。"""
         if len(closes) < period + 1:
             return 50.0
-        
-        deltas = [closes[i] - closes[i-1] for i in range(1, len(closes))]
-        gains = [d if d > 0 else 0 for d in deltas]
-        losses = [-d if d < 0 else 0 for d in deltas]
-        
-        avg_gain = sum(gains[-period:]) / period
-        avg_loss = sum(losses[-period:]) / period
-        
+
+        deltas = [closes[i] - closes[i - 1] for i in range(1, len(closes))]
+        gains = [d if d > 0 else 0.0 for d in deltas]
+        losses = [-d if d < 0 else 0.0 for d in deltas]
+
+        if len(gains) < period:
+            return 50.0
+
+        avg_gain = sum(gains[:period]) / period
+        avg_loss = sum(losses[:period]) / period
+
+        for i in range(period, len(gains)):
+            avg_gain = (avg_gain * (period - 1) + gains[i]) / period
+            avg_loss = (avg_loss * (period - 1) + losses[i]) / period
+
         if avg_loss == 0:
             return 100.0
-        
+
         rs = avg_gain / avg_loss
-        rsi = 100 - (100 / (1 + rs))
-        return round(rsi, 2)
-    
+        return round(100.0 - (100.0 / (1.0 + rs)), 2)
+
+    def _ema_series_sma_seed(self, data: List[float], period: int) -> List[Optional[float]]:
+        """
+        标准 EMA：首值 = 前 period 根简单平均（SMA），之后 EMA_t = (P_t - EMA_{t-1}) * k + EMA_{t-1}，k=2/(period+1)。
+        前 period-1 根无定义，返回 None。
+        """
+        n = len(data)
+        out: List[Optional[float]] = [None] * n
+        if n < period:
+            return out
+        k = 2.0 / (period + 1)
+        out[period - 1] = sum(data[:period]) / period
+        for i in range(period, n):
+            prev = out[i - 1]
+            if prev is None:
+                break
+            out[i] = (data[i] - prev) * k + prev
+        return out
+
     def _calc_macd(self, closes: List[float]) -> Dict[str, float]:
-        """计算MACD"""
-        def ema(data, period):
-            multiplier = 2 / (period + 1)
-            ema_values = [data[0]]
-            for i in range(1, len(data)):
-                ema_values.append((data[i] - ema_values[-1]) * multiplier + ema_values[-1])
-            return ema_values
-        
-        ema12 = ema(closes, 12)
-        ema26 = ema(closes, 26)
-        
-        macd_line = [ema12[i] - ema26[i] for i in range(len(closes))]
-        signal_line = ema(macd_line, 9)
-        histogram = [macd_line[i] - signal_line[i] for i in range(len(closes))]
-        
+        """
+        MACD(12,26,9)：DIF = EMA12(close) − EMA26(close)，DEA = EMA9(DIF)，柱 = DIF − DEA。
+        各 EMA 均采用 SMA 种子；DIF 自第 26 根 K 起有定义，信号线对 DIF 子序列再算 EMA9。
+        """
+        n = len(closes)
+        ema12 = self._ema_series_sma_seed(closes, 12)
+        ema26 = self._ema_series_sma_seed(closes, 26)
+        if n < 26 or ema12[-1] is None or ema26[-1] is None:
+            return {'MACD': 0.0, 'MACD_signal': 0.0, 'MACD_histogram': 0.0}
+
+        macd_sub: List[float] = []
+        for i in range(25, n):
+            v12 = ema12[i]
+            v26 = ema26[i]
+            if v12 is not None and v26 is not None:
+                macd_sub.append(v12 - v26)
+
+        if not macd_sub:
+            return {'MACD': 0.0, 'MACD_signal': 0.0, 'MACD_histogram': 0.0}
+
+        sig_series = self._ema_series_sma_seed(macd_sub, 9)
+        last_macd = macd_sub[-1]
+        last_sig = sig_series[-1]
+        if last_sig is None:
+            last_sig = last_macd
+
         return {
-            'MACD': round(macd_line[-1], 4),
-            'MACD_signal': round(signal_line[-1], 4),
-            'MACD_histogram': round(histogram[-1], 4)
+            'MACD': round(last_macd, 6),
+            'MACD_signal': round(last_sig, 6),
+            'MACD_histogram': round(last_macd - last_sig, 6),
         }
+
+    def _true_ranges(self, klines: List[Dict[str, Any]]) -> List[float]:
+        """每根 K 的 True Range（首根仅 H−L）。"""
+        trs: List[float] = []
+        for i, k in enumerate(klines):
+            h = float(k.get('high', 0))
+            l = float(k.get('low', 0))
+            if h <= 0 or l <= 0:
+                trs.append(0.0)
+                continue
+            if i == 0:
+                trs.append(h - l)
+            else:
+                pc = float(klines[i - 1].get('close', 0))
+                trs.append(max(h - l, abs(h - pc), abs(l - pc)))
+        return trs
+
+    def _calc_atr_wilder(self, klines: List[Dict[str, Any]], period: int = 14) -> float:
+        """Wilder ATR：首 ATR = 前 period 期 TR 简单平均，之后 ATR_t = (ATR_{t-1}*(period-1)+TR_t)/period。"""
+        trs = self._true_ranges(klines)
+        if len(trs) < period:
+            return 0.0
+        atr = sum(trs[:period]) / period
+        for i in range(period, len(trs)):
+            atr = (atr * (period - 1) + trs[i]) / period
+        return atr
     
     def _calc_bollinger(self, closes: List[float], period: int = 20, std_dev: int = 2) -> Dict[str, float]:
-        """计算布林带"""
+        """布林带：中轨为 period 收盘 SMA，σ 为总体标准差（方差/period），上下轨=中轨±std_dev×σ。"""
         if len(closes) < period:
             return {}
         
@@ -723,58 +776,86 @@ class MarketDataCollector:
     def _get_earnings_data(self, symbol: str) -> Optional[Dict[str, Any]]:
         """
         获取盈利报告数据（Earnings）
-        
-        包括：历史盈利、盈利预测、盈利日期等
+
+        使用 quarterly_income_stmt 替代已弃用的 Ticker.earnings / quarterly_earnings，
+        历史季度摘要从利润表推导；盈利日历仍用 ticker.calendar（若可用）。
         """
+        def _pick_float(stmt: pd.DataFrame, row_names: tuple, col) -> Optional[float]:
+            for name in row_names:
+                if name in stmt.index:
+                    raw = stmt.loc[name, col]
+                    if raw is None or (isinstance(raw, float) and pd.isna(raw)):
+                        continue
+                    try:
+                        return float(raw)
+                    except (TypeError, ValueError):
+                        continue
+            return None
+
         try:
             ticker = yf.Ticker(symbol)
-            earnings_data = {}
-            
-            # 历史盈利数据
+            earnings_data: Dict[str, Any] = {}
+
+            # 季度利润表（yfinance 推荐路径，避免 fundamentals.Ticker.earnings 弃用告警）
             try:
-                earnings_history = ticker.earnings_history
-                if earnings_history is not None and not earnings_history.empty:
-                    # 获取最近4个季度
-                    recent_earnings = earnings_history.head(4)
-                    earnings_data['history'] = []
-                    for _, row in recent_earnings.iterrows():
-                        earnings_data['history'].append({
-                            'date': str(row.get('Date', '')),
-                            'eps_actual': float(row.get('EPS Actual', 0)) if row.get('EPS Actual') is not None else None,
-                            'eps_estimate': float(row.get('EPS Estimate', 0)) if row.get('EPS Estimate') is not None else None,
-                            'surprise': float(row.get('Surprise(%)', 0)) if row.get('Surprise(%)') is not None else None,
+                q_inc = ticker.quarterly_income_stmt
+                if q_inc is not None and not q_inc.empty and len(q_inc.columns) > 0:
+                    cols = list(q_inc.columns)[:4]
+                    latest_q = cols[0]
+
+                    rev = _pick_float(
+                        q_inc,
+                        ("Total Revenue", "Revenue", "Total Revenues", "Net Sales"),
+                        latest_q,
+                    )
+                    ni = _pick_float(
+                        q_inc,
+                        (
+                            "Net Income",
+                            "Net Income Common Stockholders",
+                            "Net Income Continuous Operations",
+                            "Net Income Including Noncontrolling Interests",
+                        ),
+                        latest_q,
+                    )
+                    earnings_data["quarterly"] = {
+                        "latest_quarter": str(latest_q),
+                        "revenue": rev,
+                        "earnings": ni,
+                    }
+
+                    # 最近若干季度 EPS（来自利润表行，非一致预期）
+                    earnings_data["history"] = []
+                    for col in cols:
+                        eps = _pick_float(q_inc, ("Diluted EPS", "Basic EPS"), col)
+                        earnings_data["history"].append({
+                            "date": str(col),
+                            "eps_actual": eps,
+                            "eps_estimate": None,
+                            "surprise": None,
                         })
             except Exception as e:
-                logger.debug(f"Earnings history fetch failed for {symbol}: {e}")
-            
-            # 盈利日历（未来盈利日期）
+                logger.debug(f"Quarterly income statement (earnings) fetch failed for {symbol}: {e}")
+
+            # 盈利日历（未来盈利日期与一致预期）
             try:
                 earnings_calendar = ticker.calendar
                 if earnings_calendar is not None and not earnings_calendar.empty:
-                    earnings_data['upcoming'] = {
-                        'next_earnings_date': str(earnings_calendar.index[0]) if len(earnings_calendar.index) > 0 else None,
-                        'eps_estimate': float(earnings_calendar.loc[earnings_calendar.index[0], 'Earnings Estimate']) if len(earnings_calendar.index) > 0 and 'Earnings Estimate' in earnings_calendar.columns else None,
-                        'revenue_estimate': float(earnings_calendar.loc[earnings_calendar.index[0], 'Revenue Estimate']) if len(earnings_calendar.index) > 0 and 'Revenue Estimate' in earnings_calendar.columns else None,
+                    idx0 = earnings_calendar.index[0]
+                    earnings_data["upcoming"] = {
+                        "next_earnings_date": str(idx0),
+                        "eps_estimate": float(earnings_calendar.loc[idx0, "Earnings Estimate"])
+                        if "Earnings Estimate" in earnings_calendar.columns
+                        else None,
+                        "revenue_estimate": float(earnings_calendar.loc[idx0, "Revenue Estimate"])
+                        if "Revenue Estimate" in earnings_calendar.columns
+                        else None,
                     }
             except Exception as e:
                 logger.debug(f"Earnings calendar fetch failed for {symbol}: {e}")
-            
-            # 季度盈利数据
-            try:
-                quarterly_earnings = ticker.quarterly_earnings
-                if quarterly_earnings is not None and not quarterly_earnings.empty:
-                    latest_q = quarterly_earnings.index[0] if len(quarterly_earnings.index) > 0 else None
-                    if latest_q:
-                        earnings_data['quarterly'] = {
-                            'latest_quarter': str(latest_q),
-                            'revenue': float(quarterly_earnings.loc[latest_q, 'Revenue']) if 'Revenue' in quarterly_earnings.columns else None,
-                            'earnings': float(quarterly_earnings.loc[latest_q, 'Earnings']) if 'Earnings' in quarterly_earnings.columns else None,
-                        }
-            except Exception as e:
-                logger.debug(f"Quarterly earnings fetch failed for {symbol}: {e}")
-            
+
             return earnings_data if earnings_data else None
-            
+
         except Exception as e:
             logger.debug(f"Earnings data fetch failed for {symbol}: {e}")
             return None

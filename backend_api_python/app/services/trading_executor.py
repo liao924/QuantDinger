@@ -2263,8 +2263,33 @@ class TradingExecutor:
         language = amc.get("language") or amc.get("lang") or tc.get("language") or "zh-CN"
         language = str(language or "zh-CN")
 
+        # ── Billing: AI filter uses the same cost as ai_analysis ──
         try:
-            # 使用新的 FastAnalysisService (单次LLM调用，更快更稳定)
+            from app.services.billing_service import get_billing_service
+            billing = get_billing_service()
+            if billing.is_billing_enabled():
+                user_id = 1
+                try:
+                    with get_db_connection() as db:
+                        cur = db.cursor()
+                        cur.execute("SELECT user_id FROM qd_strategies_trading WHERE id = ?", (strategy_id,))
+                        row = cur.fetchone()
+                        cur.close()
+                    user_id = int((row or {}).get('user_id') or 1)
+                except Exception:
+                    pass
+                ok, msg = billing.check_and_consume(
+                    user_id=user_id,
+                    feature='ai_analysis',
+                    reference_id=f"ai_filter_{strategy_id}_{symbol}"
+                )
+                if not ok:
+                    logger.warning(f"AI filter billing failed for strategy {strategy_id}: {msg}")
+                    return False, {"ai_decision": "", "reason": f"billing_failed:{msg}"}
+        except Exception as e:
+            logger.warning(f"AI filter billing check error: {e}")
+
+        try:
             from app.services.fast_analysis import get_fast_analysis_service
 
             service = get_fast_analysis_service()

@@ -177,20 +177,19 @@ POST /api/users/change-password - Change own password
 ```text
 GET  /api/health
 GET  /api/indicator/kline
-POST /api/analysis/multi
+POST /api/fast-analysis/analyze    - Fast AI analysis (main entry)
+GET  /api/fast-analysis/history    - Analysis history
+GET  /api/fast-analysis/similar-patterns - RAG similar patterns
+POST /api/fast-analysis/feedback   - User feedback on analysis
 ```
 
-## AI memory augmentation
+## AI analysis & memory
 
-This backend includes a lightweight, privacy-first **memory-augmented multi-agent** system:
+Uses **FastAnalysisService** (single LLM call, multi-factor):
 
-- Memory DBs stored in PostgreSQL
-- API hooks:
-  - `POST /api/analysis/multi` (main entry)
-  - `POST /api/analysis/reflect` (manual learn from post-trade outcomes)
-- Controls in `.env`:
-  - `ENABLE_AGENT_MEMORY`, `AGENT_MEMORY_*`
-  - `ENABLE_REFLECTION_WORKER`, `REFLECTION_WORKER_INTERVAL_SEC`
+- Memory: `qd_analysis_memory` in PostgreSQL
+- API: `POST /api/fast-analysis/analyze` (main), `/history`, `/similar-patterns`, `/feedback`
+- Calibration: `AICalibrationService` tunes BUY/SELL thresholds from validated outcomes
 
 ## Frontend integration
 

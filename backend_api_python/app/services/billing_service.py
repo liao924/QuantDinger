@@ -30,21 +30,16 @@ DEFAULT_BILLING_CONFIG = {
     'enabled': False,  # 是否启用计费
 
     # 各功能积分消耗（0表示免费）
-    'cost_ai_analysis': 10,       # AI分析 每次消耗积分
-    'cost_strategy_run': 5,       # 策略运行 每次消耗积分（启动时）
-    'cost_backtest': 3,           # 回测 每次消耗积分
-    'cost_portfolio_monitor': 8,  # Portfolio AI监控 每次消耗积分
-    'cost_indicator_create': 0,   # 创建指标 免费
-    'cost_polymarket_deep_analysis': 15,  # Polymarket深度分析 每次消耗积分
+    # ai_analysis 统一单价：即时分析 / AI过滤 / 定时任务 均按此单价 × 标的数扣费
+    'cost_ai_analysis': 10,
+    'cost_ai_code_gen': 30,
+    'cost_polymarket_deep_analysis': 15,
 }
 
 # Feature name mapping (for log recording)
 FEATURE_NAMES = {
     'ai_analysis': 'AI Analysis',
-    'strategy_run': 'Strategy Run',
-    'backtest': 'Backtest',
-    'portfolio_monitor': 'Portfolio Monitor',
-    'indicator_create': 'Indicator Create',
+    'ai_code_gen': 'AI Code Generation',
     'polymarket_deep_analysis': 'Polymarket Deep Analysis',
 }
 
@@ -458,7 +453,7 @@ class BillingService:
         
         Args:
             user_id: 用户ID
-            feature: 功能名称（ai_analysis/strategy_run/backtest/portfolio_monitor等）
+            feature: 功能名称（ai_analysis / polymarket_deep_analysis）
             reference_id: 关联ID（可选）
         
         Returns:
@@ -716,12 +711,10 @@ class BillingService:
             'is_vip': is_vip,
             'vip_expires_at': vip_expires_at.isoformat() if vip_expires_at else None,
             'billing_enabled': config.get('enabled', False),
-            # 功能费用（供前端显示）
             'feature_costs': {
                 'ai_analysis': config.get('cost_ai_analysis', 0),
-                'strategy_run': config.get('cost_strategy_run', 0),
-                'backtest': config.get('cost_backtest', 0),
-                'portfolio_monitor': config.get('cost_portfolio_monitor', 0),
+                'ai_code_gen': config.get('cost_ai_code_gen', 0),
+                'polymarket_deep_analysis': config.get('cost_polymarket_deep_analysis', 0),
             }
         }
 

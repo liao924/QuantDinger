@@ -264,6 +264,7 @@ IMAGE_PREFIX=docker.xuanyuan.me/library/
 - **🧠 记忆增强** — 智能体从过去的分析中学习（本地RAG，非云端）
 - **🔌 5+ LLM提供商**：OpenRouter（100+模型）、OpenAI、Gemini、DeepSeek、Grok
 - **📊 Polymarket预测市场** — 预测市场按需AI分析。输入市场链接或标题 → AI分析概率差异、机会评分和交易建议。完整历史跟踪和计费集成。
+- **📋 虚拟持仓管理** — 自选股中直接创建虚拟持仓，支持做多/做空方向、数量、买入单价，实时计算盈亏。无需连接真实交易所即可跟踪模拟投资组合。
 
 ### 📈 完整交易生命周期
 
@@ -310,7 +311,7 @@ IMAGE_PREFIX=docker.xuanyuan.me/library/
 - **💳 会员计划** — 月度/年度/终身层级，可配置定价和积分
 - **₿ USDT链上支付** — TRC20扫码支付，每订单地址的HD钱包（xpub），通过TronGrid自动对账
 - **🏪 指标市场** — 用户发布和销售Python指标，您收取佣金
-- **⚙️ 管理员仪表板** — 订单管理、AI使用统计、用户分析
+- **⚙️ 管理员仪表板** — 订单管理、AI使用统计、用户分析；系统设置保存后热重载，无需重启服务
 
 ### 🔐 企业级安全
 
@@ -320,48 +321,66 @@ IMAGE_PREFIX=docker.xuanyuan.me/library/
 - **演示模式** — 公共展示的只读模式
 
 <details>
-<summary><b>🧠 AI智能体架构图（点击展开）</b></summary>
+<summary><b>🧠 AI 分析架构图（点击展开）</b></summary>
+
+当前采用 **FastAnalysisService** 单次 LLM 流程，兼顾速度与多因子决策：
 
 ```mermaid
 flowchart TB
-    subgraph Entry["🌐 API入口"]
-        A["📡 POST /api/analysis/multi"]
-        A2["🔄 POST /api/analysis/reflect"]
+    subgraph Entry["🌐 API 入口"]
+        A["📡 POST /api/fast-analysis/analyze"]
+        A2["📜 GET /api/fast-analysis/history"]
+        A3["📊 GET /api/fast-analysis/similar-patterns"]
     end
-    subgraph Service["⚙️ 服务编排"]
-        B[AnalysisService]
-        C[AgentCoordinator]
-        D["📊 构建上下文<br/>价格 · K线 · 新闻 · 指标"]
+    subgraph Data["📊 数据采集层"]
+        D1[MarketDataCollector]
+        D2["价格 · K线 · 宏观 · 新闻 · 基本面"]
+        D3["多周期共识 1D / 4H / 1H"]
     end
-    subgraph Agents["🤖 7智能体工作流"]
-        subgraph P1["📈 阶段1 · 并行分析"]
-            E1["🔍 MarketAnalyst"]
-            E2["📑 FundamentalAnalyst"]
-            E3["📰 NewsAnalyst"]
-            E4["💭 SentimentAnalyst"]
-            E5["⚠️ RiskAnalyst"]
-        end
-        subgraph P2["🎯 阶段2 · 多头vs空头辩论"]
-            F1["🐂 BullResearcher"]
-            F2["🐻 BearResearcher"]
-        end
-        subgraph P3["💹 阶段3 · 最终决策"]
-            G["🎰 TraderAgent → 买入 / 卖出 / 持有"]
-        end
+    subgraph Analysis["⚙️ 分析层"]
+        B["FastAnalysisService"]
+        C["单次 LLM 调用<br/>强约束 Prompt"]
+        E["客观评分 + 多周期共识"]
+        F["AICalibration 阈值校准"]
+        G["买入 / 卖出 / 持有"]
     end
-    subgraph Memory["🧠 本地记忆存储"]
-        M1[("智能体记忆（PostgreSQL）")]
+    subgraph Memory["🧠 记忆层"]
+        M1[("qd_analysis_memory<br/>PostgreSQL")]
+        M2["RAG 相似模式检索<br/>（可选注入 Prompt）"]
     end
-    subgraph Reflect["🔄 反思循环"]
-        R[ReflectionService]
-        W["⏰ ReflectionWorker → 验证 + 学习"]
-    end
-    A --> B --> C --> D
-    D --> P1 --> P2 --> P3
-    Agents <-.->|"RAG检索"| M1
-    C --> R
-    W -.->|"更新记忆"| M1
+    A --> B
+    B --> D1 --> D2 --> D3
+    D3 --> C --> E --> F --> G
+    B -.->|"存储"| M1
+    M1 -.->|"相似模式"| M2
+    M2 -.->|"可选上下文"| C
+    A2 --> M1
+    A3 --> M1
 ```
+
+**流程概要：**
+1. **数据采集** — 统一 `MarketDataCollector` 拉取价格、K 线、宏观、新闻、基本面
+2. **多周期共识** — 主周期 + 4H/1D 等技术周期，计算加权客观评分
+3. **单次 LLM** — 强约束 Prompt，综合技术 / 宏观 / 新闻 / 基本面
+4. **共识校准** — 当客观评分显著时，可覆盖 LLM 决策；数据质量差时倾向 HOLD
+5. **记忆存储** — 写入 `qd_analysis_memory`，支持历史查询与相似模式检索
+
+<details>
+<summary><b>📈 AI 分析优化（已实现）</b></summary>
+
+| 功能 | 说明 | 配置 |
+|------|------|------|
+| **RAG 记忆注入** | 相似历史模式注入 Prompt | 默认启用 |
+| **多指标相似度** | RSI、MACD、MA 趋势、波动率加权相似度 | 默认启用 |
+| **反思验证** | 验证历史决策，更新 `was_correct` | `ENABLE_REFLECTION_WORKER=true` |
+| **阈值自校准** | 定期校准 BUY/SELL 阈值 | `scripts/run_calibration.py` 或 `scripts/run_reflection_task.py` |
+| **置信度校准** | 按置信度分桶统计准确率并调整 | `ENABLE_CONFIDENCE_CALIBRATION=true` |
+| **市场状态感知** | 趋势/震荡市使用不同阈值（震荡市更保守） | 默认启用 |
+| **多模型投票** | 2–3 模型投票降低单点偏差 | `ENABLE_AI_ENSEMBLE=true` + `AI_ENSEMBLE_MODELS=model1,model2` |
+
+详见 `backend_api_python/env.example` 中的 AI analysis optimizations 部分。
+
+</details>
 
 </details>
 
@@ -466,10 +485,12 @@ QuantDinger/
 | **AI / LLM** | `LLM_PROVIDER`、`OPENROUTER_API_KEY`、`OPENAI_API_KEY` |
 | **OAuth** | `GOOGLE_CLIENT_ID`、`GITHUB_CLIENT_ID` |
 | **安全** | `TURNSTILE_SITE_KEY`、`ENABLE_REGISTRATION` |
+| **计费** | `BILLING_ENABLED`、`BILLING_COST_AI_ANALYSIS`、`BILLING_COST_AI_CODE_GEN` |
 | **会员** | `MEMBERSHIP_MONTHLY_PRICE_USD`、`MEMBERSHIP_MONTHLY_CREDITS` |
 | **USDT支付** | `USDT_PAY_ENABLED`、`USDT_TRC20_XPUB`、`TRONGRID_API_KEY` |
 | **代理** | `PROXY_URL` |
-| **工作器** | `ENABLE_PENDING_ORDER_WORKER`、`ENABLE_PORTFOLIO_MONITOR` |
+| **工作器** | `ENABLE_PENDING_ORDER_WORKER`、`ENABLE_PORTFOLIO_MONITOR`、`ENABLE_REFLECTION_WORKER` |
+| **AI调优** | `ENABLE_AI_ENSEMBLE`、`ENABLE_CONFIDENCE_CALIBRATION`、`AI_ENSEMBLE_MODELS` |
 
 </details>
 

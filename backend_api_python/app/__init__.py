@@ -279,6 +279,12 @@ def create_app(config_name='default'):
             start_ai_calibration_worker()
         except Exception:
             pass
+        # Reflection worker: validate past decisions, run calibration periodically.
+        try:
+            from app.services.reflection import start_reflection_worker
+            start_reflection_worker()
+        except Exception:
+            pass
         restore_running_strategies()
     
     return app

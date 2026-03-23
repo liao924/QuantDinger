@@ -698,7 +698,18 @@ IMPORTANT: Output Python code directly, without explanations, without descriptio
         return content.strip() or _template_code()
 
     def stream():
-        # 不扣任何 QDT：开源本地版直接生成/返回代码
+        from app.services.billing_service import get_billing_service
+        billing = get_billing_service()
+        ok, msg = billing.check_and_consume(
+            user_id=g.user_id,
+            feature='ai_code_gen',
+            reference_id=f"ai_code_gen_{g.user_id}_{int(time.time())}"
+        )
+        if not ok:
+            yield "data: " + json.dumps({"error": f"积分不足: {msg}"}, ensure_ascii=False) + "\n\n"
+            yield "data: [DONE]\n\n"
+            return
+
         try:
             code_text = _generate_code_via_llm()
         except Exception as e:

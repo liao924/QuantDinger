@@ -10,8 +10,9 @@ Fast Analysis Service 3.0
 """
 import json
 import os
+import re
 import time
-from typing import Dict, Any, Optional, List
+from typing import Dict, Any, Optional, List, Tuple
 from decimal import Decimal, ROUND_HALF_UP
 
 from app.utils.logger import get_logger
@@ -19,6 +20,167 @@ from app.services.llm import LLMService
 from app.services.market_data_collector import get_market_data_collector
 
 logger = get_logger(__name__)
+
+
+def _safe_float_price(value: Any, default: Optional[float] = None) -> Optional[float]:
+    """Coerce LLM/string prices to float; invalid -> default."""
+    if value is None:
+        return default
+    if isinstance(value, (int, float)):
+        if isinstance(value, float) and (value != value):  # NaN
+            return default
+        return float(value)
+    try:
+        s = str(value).strip().replace(",", "")
+        if not s:
+            return default
+        return float(s)
+    except (TypeError, ValueError):
+        return default
+
+
+def _build_trend_outlook_summary(trend_outlook: Dict[str, Any], language: str) -> str:
+    """Human-readable multi-horizon outlook for API / legacy clients."""
+    if not trend_outlook:
+        return ""
+    is_zh = str(language or "").lower().startswith("zh")
+
+    def _lbl(trend: str) -> str:
+        t = str(trend or "HOLD").upper()
+        if is_zh:
+            return {"BUY": "看多", "SELL": "看空", "HOLD": "震荡/中性"}.get(t, "震荡/中性")
+        return {"BUY": "bullish", "SELL": "bearish", "HOLD": "neutral / range"}.get(t, "neutral / range")
+
+    n24 = trend_outlook.get("next_24h") or {}
+    d3 = trend_outlook.get("next_3d") or {}
+    w1 = trend_outlook.get("next_1w") or {}
+    m1 = trend_outlook.get("next_1m") or {}
+
+    if is_zh:
+        parts = [
+            f"约24小时：{_lbl(n24.get('trend'))}（强度 {n24.get('strength', 'neutral')}）",
+            f"约3天：{_lbl(d3.get('trend'))}（强度 {d3.get('strength', 'neutral')}）",
+            f"约1周：{_lbl(w1.get('trend'))}（强度 {w1.get('strength', 'neutral')}）",
+            f"约1月：{_lbl(m1.get('trend'))}（强度 {m1.get('strength', 'neutral')}）",
+        ]
+        return "；".join(parts)
+    parts = [
+        f"~24h: {_lbl(n24.get('trend'))} ({n24.get('strength', 'neutral')})",
+        f"~3d: {_lbl(d3.get('trend'))} ({d3.get('strength', 'neutral')})",
+        f"~1w: {_lbl(w1.get('trend'))} ({w1.get('strength', 'neutral')})",
+        f"~1m: {_lbl(m1.get('trend'))} ({m1.get('strength', 'neutral')})",
+    ]
+    return " | ".join(parts)
+
+
+# -----------------------------------------------------------------------------
+# Geopolitical / major-conflict detection (word boundaries + tiers)
+# Avoid false positives: "war" in "toward/award", "tension" in "extension",
+# "us" in "focus/status", bare country names without conflict context, etc.
+# -----------------------------------------------------------------------------
+_GEO_SEVERE_PATTERNS: List[re.Pattern] = [
+    re.compile(r"\b(?:war|wars|warfare|wartime)\b", re.I),
+    re.compile(r"\b(?:invasion|invaded|invading|invade)\b", re.I),
+    re.compile(r"\b(?:airstrike|air\s*strikes?|missile\s+strike|drone\s+strike)\b", re.I),
+    re.compile(r"\b(?:military\s+attack|armed\s+attack|troops?\s+(?:fire|attack|invade))\b", re.I),
+    re.compile(r"\b(?:declare[sd]?\s+war|state\s+of\s+war|act\s+of\s+war)\b", re.I),
+    re.compile(r"\b(?:martial\s+law|military\s+coup|coup\s+d['\u2019]?etat)\b", re.I),
+    re.compile(r"\b(?:terror(?:ist)?\s+attack|mass\s+shooting\s+at)\b", re.I),
+]
+_GEO_MODERATE_PATTERNS: List[re.Pattern] = [
+    re.compile(r"\bgeopolitical\b", re.I),
+    re.compile(r"\b(?:armed|military)\s+conflict\b", re.I),
+    re.compile(r"\b(?:international\s+)?sanctions?\s+(?:on|against|targeting|hit)\b", re.I),
+    re.compile(r"\b(?:naval\s+blockade|border\s+clash|ceasefire\s+(?:broken|violated))\b", re.I),
+    re.compile(r"\b(?:evacuat\w+\s+(?:the\s+)?embassy|embassy\s+evacuation)\b", re.I),
+    re.compile(r"\b(?:nuclear\s+(?:threat|strike|weapon)|nuclear\s+war)\b", re.I),
+]
+# "Crisis" / "tension" only in clearly geopolitical phrases (not substring of "extension")
+_GEO_CONTEXT_MODERATE: List[re.Pattern] = [
+    re.compile(r"\b(?:geopolitical|diplomatic|border)\s+(?:crisis|tension|standoff)\b", re.I),
+    re.compile(r"\b(?:tensions?\s+(?:rise|escalat|flare|mount)\s+(?:with|between))\b", re.I),
+    re.compile(r"\b(?:middle\s+east|south\s+china\s+sea|taiwan\s+strait)\s+(?:crisis|tension|conflict)\b", re.I),
+]
+_GEO_ZH_SEVERE = (
+    "宣战", "战争爆发", "全面战争", "武装冲突", "军事打击", "军事入侵", "空袭", "导弹袭击",
+    "开战", "交火", "战火",
+)
+_GEO_ZH_MODERATE = (
+    "地缘政治危机", "国际制裁升级", "断交", "撤侨", "军事对峙", "地区冲突升级",
+)
+
+# Optional: country/region + conflict verb (single pattern, avoids "NYSE" noise)
+_GEO_REGION_CONFLICT: List[re.Pattern] = [
+    re.compile(
+        r"\b(?:russia|ukraine|iran|israel|gaza|hamas|taiwan|north\s+korea|dprk|"
+        r"syria|yemen|lebanon|nato)\b.{0,40}\b(?:invade|attack|strike|war|conflict|sanction)\b",
+        re.I,
+    ),
+    re.compile(
+        r"\b(?:invade|attack|strike|war|conflict|sanction)\b.{0,40}\b(?:russia|ukraine|iran|israel|"
+        r"gaza|hamas|taiwan|north\s+korea|dprk|syria|nato)\b",
+        re.I,
+    ),
+]
+
+_GEO_MAJOR_NEWS_SEVERE = [
+    re.compile(r"\b(?:war|wars|warfare)\b", re.I),
+    re.compile(r"\b(?:invasion|invaded|military\s+attack|airstrike)\b", re.I),
+    re.compile(r"\b(?:armed\s+conflict|military\s+conflict)\b", re.I),
+]
+
+
+def _geopolitical_match_level(combined_text: str) -> Tuple[str, Optional[str]]:
+    """
+    Returns (level, reason_tag) where level is 'none'|'severe'|'moderate'.
+    combined_text: title + summary (original case OK; English patterns use lower via regex I flag).
+    """
+    if not combined_text or len(combined_text.strip()) < 4:
+        return "none", None
+    low = combined_text.lower()
+    for pat in _GEO_SEVERE_PATTERNS:
+        if pat.search(low):
+            return "severe", pat.pattern[:48]
+    for z in _GEO_ZH_SEVERE:
+        if z in combined_text:
+            return "severe", z
+    for pat in _GEO_REGION_CONFLICT:
+        if pat.search(low):
+            return "severe", "region+conflict"
+    for pat in _GEO_MODERATE_PATTERNS:
+        if pat.search(low):
+            return "moderate", pat.pattern[:48]
+    for pat in _GEO_CONTEXT_MODERATE:
+        if pat.search(low):
+            return "moderate", pat.pattern[:48]
+    for z in _GEO_ZH_MODERATE:
+        if z in combined_text:
+            return "moderate", z
+    return "none", None
+
+
+def _geopolitical_sentiment_penalty_delta(level: str) -> int:
+    if level == "severe":
+        return -42
+    if level == "moderate":
+        return -18
+    return 0
+
+
+def _is_major_geopolitical_news_text(combined_text: str) -> bool:
+    """Stricter than sentiment: only clear conflict / war signals for _has_major_news."""
+    if not combined_text:
+        return False
+    low = combined_text.lower()
+    for pat in _GEO_MAJOR_NEWS_SEVERE:
+        if pat.search(low):
+            return True
+    for z in _GEO_ZH_SEVERE:
+        if z in combined_text:
+            return True
+    if any(p.search(low) for p in _GEO_REGION_CONFLICT):
+        return True
+    return False
 
 
 class FastAnalysisService:
@@ -364,10 +526,12 @@ You are CONSERVATIVE and OBJECTIVE. Your analysis must be based on DATA, not spe
 
 ⚠️ CRITICAL PRICE RULES:
 1. Current price: ${current_price}
-2. Your stop_loss MUST be near ${suggested_stop_loss:.4f} (range: ${price_lower_bound:.4f} ~ ${current_price})
-3. Your take_profit MUST be near ${suggested_take_profit:.4f} (range: ${current_price} ~ ${price_upper_bound:.4f})
-4. Entry price: ${entry_range_low:.4f} ~ ${entry_range_high:.4f}
-5. These levels are based on ATR and support/resistance analysis - use them as reference!
+2. If decision=BUY: stop_loss should be below current price, take_profit above current price.
+3. If decision=SELL (short): stop_loss MUST be above current price; take_profit MUST be below current price.
+4. BUY stop_loss reference: near ${suggested_stop_loss:.4f} (range: ${price_lower_bound:.4f} ~ ${current_price})
+5. BUY take_profit reference: near ${suggested_take_profit:.4f} (range: ${current_price} ~ ${price_upper_bound:.4f})
+6. Entry price: ${entry_range_low:.4f} ~ ${entry_range_high:.4f}
+7. These levels are based on ATR and support/resistance analysis - use them as reference!
 
 📊 YOUR ANALYSIS MUST INCLUDE (ALL factors are important):
 1. **Technical Analysis**: Objectively interpret RSI, MACD, MA, support/resistance. Be honest about conflicting signals.
@@ -499,6 +663,9 @@ When the score is neutral (-20 to +20), you can use your judgment, but still con
 
 📈 EARNINGS DATA:
 {self._format_earnings_data(fundamental.get('earnings', {}))}
+
+📚 HISTORICAL PATTERNS (similar conditions in the past):
+{self._get_memory_context(data.get('market', ''), data.get('symbol', ''), indicators)}
 
 IMPORTANT: 
 1. **CRITICAL**: Check for GEOPOLITICAL EVENTS (wars, conflicts, military actions) in the news section. These events have HIGHEST PRIORITY and can override all technical indicators.
@@ -817,6 +984,55 @@ IMPORTANT:
                 weighted_score_sum += overall_score * w
                 weighted_score_w_sum += w
 
+            # Extra horizon score (not used in consensus override):
+            # add 1W objective score for short/medium trend outlook.
+            if "1W" not in objective_by_tf:
+                try:
+                    d_1w = self._collect_market_data(
+                        market,
+                        symbol,
+                        "1W",
+                        include_macro=False,
+                        include_news=False,
+                        include_polymarket=False,
+                        timeout=25,
+                    )
+                    cp_1w = _extract_current_price(d_1w) or 0.0
+                    obj_1w = self._calculate_objective_score(d_1w, cp_1w)
+                    sc_1w = float(obj_1w.get("overall_score", 0.0) or 0.0)
+                    objective_by_tf["1W"] = {
+                        "objective_score": obj_1w,
+                        "overall_score": sc_1w,
+                        "decision": self._score_to_decision(sc_1w, market=market),
+                        "abs_score": abs(sc_1w),
+                    }
+                except Exception as e:
+                    logger.debug(f"1W outlook score skipped: {e}")
+
+            # Short-horizon outlook: 1H bar (24h-style), not 1D close
+            if "1H" not in objective_by_tf:
+                try:
+                    d_1h = self._collect_market_data(
+                        market,
+                        symbol,
+                        "1H",
+                        include_macro=False,
+                        include_news=False,
+                        include_polymarket=False,
+                        timeout=18,
+                    )
+                    cp_1h = _extract_current_price(d_1h) or 0.0
+                    obj_1h = self._calculate_objective_score(d_1h, cp_1h)
+                    sc_1h = float(obj_1h.get("overall_score", 0.0) or 0.0)
+                    objective_by_tf["1H"] = {
+                        "objective_score": obj_1h,
+                        "overall_score": sc_1h,
+                        "decision": self._score_to_decision(sc_1h, market=market),
+                        "abs_score": abs(sc_1h),
+                    }
+                except Exception as e:
+                    logger.debug(f"1H outlook score skipped: {e}")
+
             consensus_score = weighted_score_sum / weighted_score_w_sum if weighted_score_w_sum > 0 else 0.0
             consensus_decision = self._score_to_decision(consensus_score, market=market)
             consensus_abs = abs(consensus_score)
@@ -892,32 +1108,52 @@ IMPORTANT:
             
             # Phase 2: Build prompt
             system_prompt, user_prompt = self._build_analysis_prompt(data, language)
-            
-            # Phase 3: Single LLM call
-            logger.info(f"Calling LLM for analysis...")
+
+            default_struct = {
+                "decision": "HOLD",
+                "confidence": 50,
+                "summary": "Analysis failed",
+                "entry_price": current_price,
+                "stop_loss": current_price * 0.95,
+                "take_profit": current_price * 1.05,
+                "position_size_pct": 10,
+                "timeframe": "medium",
+                "key_reasons": ["Unable to analyze"],
+                "risks": ["Analysis error"],
+                "technical_score": 50,
+                "fundamental_score": 50,
+                "sentiment_score": 50,
+            }
+
+            # Phase 3: LLM call(s) - single or ensemble voting
+            logger.info("Calling LLM for analysis...")
             llm_start = time.time()
-            
-            analysis = self.llm_service.safe_call_llm(
-                system_prompt,
-                user_prompt,
-                default_structure={
-                    "decision": "HOLD",
-                    "confidence": 50,
-                    "summary": "Analysis failed",
-                    "entry_price": current_price,
-                    "stop_loss": current_price * 0.95,
-                    "take_profit": current_price * 1.05,
-                    "position_size_pct": 10,
-                    "timeframe": "medium",
-                    "key_reasons": ["Unable to analyze"],
-                    "risks": ["Analysis error"],
-                    "technical_score": 50,
-                    "fundamental_score": 50,
-                    "sentiment_score": 50,
-                },
-                model=model
-            )
-            
+            ensemble_models = []
+            if os.getenv("ENABLE_AI_ENSEMBLE", "false").lower() == "true":
+                env_models = (os.getenv("AI_ENSEMBLE_MODELS") or "").strip()
+                if env_models:
+                    ensemble_models = [m.strip() for m in env_models.split(",") if m.strip()]
+
+            if len(ensemble_models) >= 2:
+                analyses_list = []
+                for em in ensemble_models[:3]:
+                    a = self.llm_service.safe_call_llm(
+                        system_prompt, user_prompt, default_structure=default_struct, model=em
+                    )
+                    analyses_list.append(a)
+                decisions = [str(a.get("decision", "HOLD") or "HOLD").upper() for a in analyses_list]
+                from collections import Counter
+                vote = Counter(decisions).most_common(1)[0][0]
+                idx = decisions.index(vote)
+                analysis = analyses_list[idx].copy()
+                analysis["decision"] = vote
+                analysis["_ensemble_vote"] = dict(Counter(decisions))
+                analysis["_ensemble_models"] = ensemble_models[:3]
+            else:
+                analysis = self.llm_service.safe_call_llm(
+                    system_prompt, user_prompt, default_structure=default_struct, model=model
+                )
+
             llm_time = int((time.time() - llm_start) * 1000)
             logger.info(f"LLM call completed in {llm_time}ms")
             
@@ -932,6 +1168,50 @@ IMPORTANT:
             score_based_decision = self._score_to_decision(objective_score["overall_score"], market=market)
             llm_decision = str(analysis.get("decision", "HOLD") or "HOLD").upper()
 
+            # Horizon trend outlook for users (short/medium/long decision reference)
+            score_1d = float((objective_by_tf.get("1D") or {}).get("overall_score", objective_score.get("overall_score", 0.0)) or 0.0)
+            score_4h = float((objective_by_tf.get("4H") or {}).get("overall_score", score_1d) or score_1d)
+            score_1h = float((objective_by_tf.get("1H") or {}).get("overall_score", score_4h) or score_4h)
+            # ~24h: prefer 1H bar objective; fall back 4H -> 1D
+            score_24h = float(score_1h)
+            score_1w = float((objective_by_tf.get("1W") or {}).get("overall_score", score_1d) or score_1d)
+            score_3d = score_1d * 0.7 + score_4h * 0.3
+            score_1m = score_1w * 0.55 + float(objective_score.get("fundamental_score", 0.0)) * 0.30 + float(objective_score.get("macro_score", 0.0)) * 0.15
+
+            def _trend_strength(score_val: float) -> str:
+                a = abs(float(score_val))
+                if a >= 70:
+                    return "strong"
+                if a >= 40:
+                    return "moderate"
+                if a >= 20:
+                    return "mild"
+                return "neutral"
+
+            trend_outlook = {
+                "next_24h": {
+                    "score": round(score_24h, 2),
+                    "trend": self._score_to_decision(score_24h, market=market),
+                    "strength": _trend_strength(score_24h),
+                },
+                "next_3d": {
+                    "score": round(score_3d, 2),
+                    "trend": self._score_to_decision(score_3d, market=market),
+                    "strength": _trend_strength(score_3d),
+                },
+                "next_1w": {
+                    "score": round(score_1w, 2),
+                    "trend": self._score_to_decision(score_1w, market=market),
+                    "strength": _trend_strength(score_1w),
+                },
+                "next_1m": {
+                    "score": round(score_1m, 2),
+                    "trend": self._score_to_decision(score_1m, market=market),
+                    "strength": _trend_strength(score_1m),
+                },
+            }
+            trend_outlook_summary = _build_trend_outlook_summary(trend_outlook, language)
+
             # Consensus confidence:
             consensus_conf = int(max(40, min(98, 50 + consensus_abs * 0.35)))
             # Agreement boosts, disagreement reduces
@@ -942,6 +1222,9 @@ IMPORTANT:
             cfg = self._get_ai_calibration(market=market)
             min_abs_override = float(cfg.get("min_consensus_abs_override") or 15.0)
             quality_hold_thr = float(cfg.get("quality_hold_threshold") or 0.7)
+            regime = self._detect_market_regime(data.get("indicators") or {})
+            if regime == "ranging":
+                min_abs_override *= 1.2
 
             if consensus_abs >= min_abs_override:
                 final_decision = consensus_decision
@@ -953,11 +1236,21 @@ IMPORTANT:
                 analysis["decision"] = final_decision
                 analysis["confidence"] = consensus_conf
                 original_summary = analysis.get("summary", "")
-                level = "强烈" if consensus_abs >= 70 else "明显" if consensus_abs >= 40 else "轻微"
-                analysis["summary"] = (
-                    f"{original_summary} [多周期客观共识：综合评分{consensus_score:.1f}分（"
-                    f"{level}{'利多' if consensus_score > 0 else '利空'}），建议{final_decision}]"
-                )
+                is_zh = str(language or "").lower().startswith("zh")
+                if is_zh:
+                    level = "强烈" if consensus_abs >= 70 else "明显" if consensus_abs >= 40 else "轻微"
+                    bias = "利多" if consensus_score > 0 else "利空"
+                    consensus_note = (
+                        f"[多周期客观共识：综合评分{consensus_score:.1f}分（{level}{bias}），建议{final_decision}]"
+                    )
+                else:
+                    level = "strong" if consensus_abs >= 70 else "moderate" if consensus_abs >= 40 else "mild"
+                    bias = "bullish" if consensus_score > 0 else "bearish"
+                    consensus_note = (
+                        f"[Multi-timeframe objective consensus: score {consensus_score:.1f} "
+                        f"({level} {bias}), suggested decision {final_decision}]"
+                    )
+                analysis["summary"] = f"{original_summary} {consensus_note}".strip()
             else:
                 # Near-neutral: keep LLM but shrink confidence by quality and enforce HOLD if quality is poor
                 analysis["confidence"] = int(max(0, min(100, int(analysis.get("confidence", 50) or 50) * quality_multiplier)))
@@ -983,6 +1276,7 @@ IMPORTANT:
                 "consensus_abs": consensus_abs,
                 "agreement_ratio": agreement_ratio,
                 "quality_multiplier": quality_multiplier,
+                "market_regime": regime,
             }
             
             # Phase 5: Validate and constrain output (pass indicators for decision validation)
@@ -1014,6 +1308,17 @@ IMPORTANT:
             except Exception:
                 # Keep model-provided position_size_pct
                 pass
+
+            # Confidence calibration: adjust by historical accuracy in bucket
+            if os.getenv("ENABLE_CONFIDENCE_CALIBRATION", "false").lower() == "true":
+                try:
+                    from app.services.analysis_memory import get_analysis_memory
+                    raw_conf = int(analysis.get("confidence", 50) or 50)
+                    analysis["confidence"] = get_analysis_memory().get_adjusted_confidence(
+                        raw_conf, market=market, symbol=symbol
+                    )
+                except Exception as e:
+                    logger.debug(f"Confidence calibration skipped: {e}")
             
             # Build final result
             total_time = int((time.time() - start_time) * 1000)
@@ -1041,6 +1346,15 @@ IMPORTANT:
                     "take_profit": analysis.get("take_profit"),
                     "position_size_pct": analysis.get("position_size_pct", 10),
                     "timeframe": analysis.get("timeframe", "medium"),
+                    # camelCase + 语义别名：供私有前端/旧版组件绑定（勿用 indicators.trading_levels 充当计划）
+                    "entryPrice": analysis.get("entry_price"),
+                    "stopLoss": analysis.get("stop_loss"),
+                    "takeProfit": analysis.get("take_profit"),
+                    "positionSizePct": analysis.get("position_size_pct", 10),
+                    "decision": str(analysis.get("decision", "HOLD") or "HOLD").upper(),
+                    # 与 stop_loss / take_profit 数值相同；命名强调「亏损离场 / 盈利目标」避免与多单参考线混淆
+                    "loss_exit_price": analysis.get("stop_loss"),
+                    "profit_target_price": analysis.get("take_profit"),
                 },
                 "reasons": analysis.get("key_reasons", []),
                 "risks": analysis.get("risks", []),
@@ -1060,6 +1374,10 @@ IMPORTANT:
                 },
                 "indicators": data.get("indicators", {}),
                 "consensus": analysis.get("consensus", {}),
+                "trend_outlook": trend_outlook,
+                "trend_outlook_summary": trend_outlook_summary,
+                "trendOutlook": trend_outlook,
+                "trendOutlookSummary": trend_outlook_summary,
                 "analysis_time_ms": total_time,
                 "llm_time_ms": llm_time,
                 "data_collection_time_ms": data.get("collection_time_ms", 0),
@@ -1149,51 +1467,45 @@ IMPORTANT:
         """
         检查是否有重大新闻事件。
         重大新闻包括：监管变化、重大合作、丑闻、重大政策、地缘政治事件等。
+        地缘类使用词边界与分级，避免 toward/extension/us 等子串误判。
         """
         if not news_data:
             return False
-        
-        # 检查新闻标题中的关键词（扩展了地缘政治相关关键词）
+
+        # 子串关键词（较长词或中文，避免过短英文误匹配）
         major_keywords = [
-            # 监管和政策
-            "regulation", "regulatory", "ban", "approval", "policy", "government", "central bank",
+            "regulation", "regulatory", "approval", "policy", "government", "central bank",
             "监管", "禁令", "批准", "政策", "政府", "央行",
-            # 商业事件
             "partnership", "merger", "acquisition", "scandal", "lawsuit", "investigation",
             "合作", "合并", "收购", "丑闻", "诉讼", "调查",
-            # 地缘政治事件（新增）
-            "war", "conflict", "military", "attack", "strike", "sanctions", "tension", "crisis",
-            "geopolitical", "iran", "israel", "russia", "ukraine", "china", "taiwan", "north korea",
-            "middle east", "gulf", "nato", "united states", "us", "usa", "america",
-            "战争", "冲突", "军事", "袭击", "打击", "制裁", "紧张", "危机",
-            "地缘政治", "伊朗", "以色列", "俄罗斯", "乌克兰", "中国", "台湾", "朝鲜",
-            "中东", "海湾", "北约", "美国"
+            "sanctions", "embargo", "制裁", "中东", "海湾", "北约",
+            "united states", "middle east",
         ]
-        
-        for news in news_data[:10]:  # 检查前10条最新新闻（增加检查范围）
-            title = (news.get("title") or news.get("headline") or "").lower()
-            summary = (news.get("summary") or "").lower()
+        # 短英文词用词边界匹配（不用裸子串）
+        major_short_patterns = [
+            re.compile(r"\b(?:ban|banned|banning)\b", re.I),
+            re.compile(r"\b(?:crisis|crises)\b", re.I),
+            re.compile(r"\b(?:catastrophe|meltdown)\b", re.I),
+        ]
+
+        for news in news_data[:10]:
+            title = news.get("title") or news.get("headline") or ""
+            summary = news.get("summary") or ""
             sentiment = news.get("sentiment", "neutral")
-            
-            # 检查标题和摘要中是否包含重大关键词
             text_to_check = f"{title} {summary}"
-            
-            # 地缘政治事件通常很严重，即使情绪是中性也要识别
-            geopolitical_keywords = [
-                "war", "conflict", "military", "attack", "strike", "geopolitical",
-                "战争", "冲突", "军事", "袭击", "打击", "地缘政治"
-            ]
-            
-            # 如果是地缘政治相关，直接认为是重大新闻
-            if any(keyword in text_to_check for keyword in geopolitical_keywords):
-                logger.info(f"Detected major geopolitical event in news: {title[:60]}")
+            low = text_to_check.lower()
+
+            if _is_major_geopolitical_news_text(text_to_check):
+                logger.info(f"Detected major geopolitical event in news: {low[:80]}")
                 return True
-            
-            # 其他重大关键词且情绪强烈（非中性），认为是重大新闻
-            if any(keyword in text_to_check for keyword in major_keywords) and sentiment != "neutral":
-                logger.info(f"Detected major news event: {title[:60]}")
+
+            if any(kw in low for kw in major_keywords) and sentiment != "neutral":
+                logger.info(f"Detected major news event: {low[:80]}")
                 return True
-        
+            if sentiment != "neutral" and any(p.search(low) for p in major_short_patterns):
+                logger.info(f"Detected major news event (pattern): {low[:80]}")
+                return True
+
         return False
     
     def _has_macro_event(self, macro_data: Dict, market: str) -> bool:
@@ -1227,6 +1539,88 @@ IMPORTANT:
         
         return False
     
+    def _finalize_trading_plan_for_decision(
+        self, analysis: Dict, current_price: float, indicators: Optional[Dict] = None
+    ) -> Dict:
+        """
+        After decision is final: force correct stop/take-profit geometry and mirror long levels for shorts.
+        BUY: stop_loss < current < take_profit
+        SELL: take_profit < current < stop_loss (short: stop above, TP below)
+        """
+        if not current_price or current_price <= 0:
+            return analysis
+        indicators = indicators or {}
+        decision = str(analysis.get("decision", "HOLD")).upper()
+        if decision not in ("BUY", "SELL"):
+            return analysis
+
+        min_price = current_price * 0.90
+        max_price = current_price * 1.10
+        eps = max(abs(current_price) * 1e-6, 1e-8)
+
+        tl = indicators.get("trading_levels") or {}
+        sl_long = _safe_float_price(tl.get("suggested_stop_loss"))
+        tp_long = _safe_float_price(tl.get("suggested_take_profit"))
+        long_ok = (
+            sl_long is not None
+            and tp_long is not None
+            and sl_long < current_price - eps
+            and tp_long > current_price + eps
+        )
+
+        if decision == "SELL":
+            if long_ok:
+                mirrored_sl = round(2 * current_price - sl_long, 6)
+                mirrored_tp = round(2 * current_price - tp_long, 6)
+                mirrored_sl = min(max(mirrored_sl, current_price + eps), max_price)
+                mirrored_tp = max(min(mirrored_tp, current_price - eps), min_price)
+                if mirrored_sl > current_price and mirrored_tp < current_price:
+                    analysis["stop_loss"] = mirrored_sl
+                    analysis["take_profit"] = mirrored_tp
+                else:
+                    analysis["stop_loss"] = round(min(max_price, current_price * 1.05), 6)
+                    analysis["take_profit"] = round(max(min_price, current_price * 0.95), 6)
+            else:
+                sl_f = _safe_float_price(analysis.get("stop_loss"))
+                tp_f = _safe_float_price(analysis.get("take_profit"))
+                if sl_f is not None and tp_f is not None and tp_f < current_price < sl_f:
+                    analysis["stop_loss"] = round(min(max(sl_f, current_price + eps), max_price), 6)
+                    analysis["take_profit"] = round(max(min(tp_f, current_price - eps), min_price), 6)
+                else:
+                    analysis["stop_loss"] = round(min(max_price, current_price * 1.05), 6)
+                    analysis["take_profit"] = round(max(min_price, current_price * 0.95), 6)
+        else:  # BUY
+            if long_ok:
+                sl = max(min(sl_long, current_price - eps), min_price)
+                tp = min(max(tp_long, current_price + eps), max_price)
+                analysis["stop_loss"] = round(sl, 6)
+                analysis["take_profit"] = round(tp, 6)
+            else:
+                sl_f = _safe_float_price(analysis.get("stop_loss"))
+                tp_f = _safe_float_price(analysis.get("take_profit"))
+                if sl_f is not None and tp_f is not None and sl_f < current_price < tp_f:
+                    analysis["stop_loss"] = round(max(min(sl_f, current_price - eps), min_price), 6)
+                    analysis["take_profit"] = round(min(max(tp_f, current_price + eps), max_price), 6)
+                else:
+                    analysis["stop_loss"] = round(max(min_price, current_price * 0.95), 6)
+                    analysis["take_profit"] = round(min(max_price, current_price * 1.05), 6)
+
+        # Last-resort: fix inverted or equal levels
+        sl_f = _safe_float_price(analysis.get("stop_loss"), current_price)
+        tp_f = _safe_float_price(analysis.get("take_profit"), current_price)
+        if sl_f is None or tp_f is None:
+            return analysis
+        if decision == "SELL":
+            if not (tp_f < current_price < sl_f):
+                analysis["stop_loss"] = round(min(max_price, current_price * 1.05), 6)
+                analysis["take_profit"] = round(max(min_price, current_price * 0.95), 6)
+        else:
+            if not (sl_f < current_price < tp_f):
+                analysis["stop_loss"] = round(max(min_price, current_price * 0.95), 6)
+                analysis["take_profit"] = round(min(max_price, current_price * 1.05), 6)
+
+        return analysis
+
     def _validate_and_constrain(self, analysis: Dict, current_price: float, indicators: Dict = None,
                                  has_major_news: bool = False, has_macro_event: bool = False) -> Dict:
         """
@@ -1239,22 +1633,45 @@ IMPORTANT:
         # Price bounds
         min_price = current_price * 0.90
         max_price = current_price * 1.10
+        decision = str(analysis.get("decision", "HOLD")).upper()
         
         # Constrain entry price
-        entry = analysis.get("entry_price", current_price)
-        if entry and (entry < min_price or entry > max_price):
+        entry = _safe_float_price(analysis.get("entry_price"), current_price)
+        if entry is not None and (entry < min_price or entry > max_price):
             logger.warning(f"Entry price {entry} out of bounds, constraining to current price {current_price}")
             analysis["entry_price"] = round(current_price, 6)
+        elif entry is not None:
+            analysis["entry_price"] = round(entry, 6)
         
-        # Constrain stop loss
-        stop_loss = analysis.get("stop_loss", current_price * 0.95)
-        if stop_loss and (stop_loss < min_price or stop_loss > current_price):
-            analysis["stop_loss"] = round(current_price * 0.95, 6)
-        
-        # Constrain take profit
-        take_profit = analysis.get("take_profit", current_price * 1.05)
-        if take_profit and (take_profit < current_price or take_profit > max_price):
-            analysis["take_profit"] = round(current_price * 1.05, 6)
+        # Constrain stop loss / take profit by direction (numeric-safe).
+        # BUY: stop_loss < current < take_profit
+        # SELL: take_profit < current < stop_loss
+        if decision == "SELL":
+            stop_default = round(current_price * 1.05, 6)
+            tp_default = round(current_price * 0.95, 6)
+            stop_loss = _safe_float_price(analysis.get("stop_loss"), stop_default)
+            take_profit = _safe_float_price(analysis.get("take_profit"), tp_default)
+            if stop_loss is None or stop_loss <= current_price or stop_loss > max_price:
+                analysis["stop_loss"] = stop_default
+            else:
+                analysis["stop_loss"] = round(stop_loss, 6)
+            if take_profit is None or take_profit >= current_price or take_profit < min_price:
+                analysis["take_profit"] = tp_default
+            else:
+                analysis["take_profit"] = round(take_profit, 6)
+        else:
+            stop_default = round(current_price * 0.95, 6)
+            tp_default = round(current_price * 1.05, 6)
+            stop_loss = _safe_float_price(analysis.get("stop_loss"), stop_default)
+            take_profit = _safe_float_price(analysis.get("take_profit"), tp_default)
+            if stop_loss is None or stop_loss < min_price or stop_loss >= current_price:
+                analysis["stop_loss"] = stop_default
+            else:
+                analysis["stop_loss"] = round(stop_loss, 6)
+            if take_profit is None or take_profit <= current_price or take_profit > max_price:
+                analysis["take_profit"] = tp_default
+            else:
+                analysis["take_profit"] = round(take_profit, 6)
         
         # Constrain confidence
         confidence = analysis.get("confidence", 50)
@@ -1266,7 +1683,6 @@ IMPORTANT:
             analysis[score_key] = max(0, min(100, int(score)))
         
         # Validate decision
-        decision = str(analysis.get("decision", "HOLD")).upper()
         if decision not in ["BUY", "SELL", "HOLD"]:
             analysis["decision"] = "HOLD"
         else:
@@ -1279,6 +1695,9 @@ IMPORTANT:
                 has_major_news=has_major_news, 
                 has_macro_event=has_macro_event
             )
+
+        # Final geometry after any decision change (e.g. forced HOLD skips finalize in caller — still safe)
+        analysis = self._finalize_trading_plan_for_decision(analysis, current_price, indicators)
         
         return analysis
     
@@ -1729,71 +2148,64 @@ IMPORTANT:
     def _calculate_sentiment_score(self, news: List[Dict]) -> float:
         """
         计算新闻情绪评分 (-100 to +100)
-        包含地缘政治事件的特殊处理
+        地缘/冲突类：词边界 + 分级惩罚，单条封顶，避免 extension/toward 等误判叠加。
         """
         if not news:
             return 0.0  # 无新闻，中性
-        
+
         positive_count = 0
         negative_count = 0
         neutral_count = 0
-        geopolitical_penalty = 0  # 地缘政治事件惩罚分数
-        geopolitical_count = 0  # 地缘政治事件数量
-        
-        # 地缘政治关键词
-        geopolitical_keywords = [
-            "war", "conflict", "military", "attack", "strike", "sanctions",
-            "geopolitical", "crisis", "tension", "iran", "israel", "russia",
-            "ukraine", "middle east", "nato", "united states",
-            "战争", "冲突", "军事", "袭击", "制裁", "地缘政治", "危机"
-        ]
-        
-        for item in news[:15]:  # 检查前15条新闻
-            title = (item.get("headline") or item.get("title") or "").lower()
-            summary = (item.get("summary") or "").lower()
+        geopolitical_penalty = 0
+        max_geo_total = int(os.getenv("SENTIMENT_GEO_PENALTY_CAP", "-55"))
+
+        for item in news[:15]:
+            title = item.get("headline") or item.get("title") or ""
+            summary = item.get("summary") or ""
             text = f"{title} {summary}"
             sentiment = item.get("sentiment", "neutral")
             is_global_event = item.get("is_global_event", False)
-            
-            # 检查是否是地缘政治事件
-            is_geopolitical = is_global_event or any(keyword in text for keyword in geopolitical_keywords)
-            
-            if is_geopolitical:
-                geopolitical_count += 1
-                # 地缘政治事件通常是利空的，给予严重惩罚
-                if any(kw in text for kw in ["war", "conflict", "attack", "strike", "战争", "冲突", "袭击", "打击"]):
-                    geopolitical_penalty -= 50  # 战争/冲突事件严重利空
-                elif any(kw in text for kw in ["sanctions", "crisis", "tension", "制裁", "危机", "紧张"]):
-                    geopolitical_penalty -= 30  # 制裁/危机事件利空
-                else:
-                    geopolitical_penalty -= 20  # 其他地缘政治事件利空
-                logger.info(f"Detected geopolitical event in sentiment scoring: {title[:60]}, penalty: {geopolitical_penalty}")
-            
-            # 统计普通新闻情绪
+
+            level, tag = _geopolitical_match_level(text)
+            if is_global_event and level == "none":
+                level, tag = "moderate", "is_global_event"
+
+            if level != "none":
+                delta = _geopolitical_sentiment_penalty_delta(level)
+                new_total = geopolitical_penalty + delta
+                if new_total < max_geo_total:
+                    delta = max_geo_total - geopolitical_penalty
+                geopolitical_penalty += delta
+                preview = (title or summary or "")[:72]
+                logger.info(
+                    f"Geopolitical sentiment ({level}, {tag}): {preview!r}, "
+                    f"delta={delta}, cumulative={geopolitical_penalty}"
+                )
+
             if sentiment == "positive":
                 positive_count += 1
             elif sentiment == "negative":
                 negative_count += 1
             else:
                 neutral_count += 1
-        
+
         total = positive_count + negative_count + neutral_count
-        
-        # 计算净情绪（普通新闻）
+
         if total > 0:
             net_sentiment = (positive_count - negative_count) / total
-            base_score = net_sentiment * 60  # 基础情绪分数（-60到+60）
+            base_score = net_sentiment * 60
         else:
             base_score = 0
-        
-        # 地缘政治事件惩罚（如果有地缘政治事件，直接应用惩罚）
-        if geopolitical_count > 0:
-            # 地缘政治事件的影响权重很高，直接叠加惩罚
+
+        if geopolitical_penalty != 0:
             final_score = base_score + geopolitical_penalty
-            logger.info(f"Sentiment score: base={base_score:.1f}, geopolitical_penalty={geopolitical_penalty}, final={final_score:.1f}")
+            logger.info(
+                f"Sentiment score: base={base_score:.1f}, "
+                f"geopolitical_penalty={geopolitical_penalty}, final={final_score:.1f}"
+            )
         else:
             final_score = base_score
-        
+
         return max(-100, min(100, final_score))
     
     def _calculate_macro_score(self, macro: Dict, market: str) -> float:
@@ -1908,6 +2320,14 @@ IMPORTANT:
         
         return max(-100, min(100, score))
     
+    def _detect_market_regime(self, indicators: Dict) -> str:
+        """Detect trending vs ranging from MA trend. trending | ranging"""
+        ma = indicators.get("moving_averages") or {}
+        trend = str(ma.get("trend", "sideways")).lower()
+        if "uptrend" in trend or "downtrend" in trend or "strong" in trend:
+            return "trending"
+        return "ranging"
+
     def _score_to_decision(self, score: float, *, market: str = "Crypto") -> str:
         """
         根据客观评分转换为决策
@@ -2072,7 +2492,11 @@ IMPORTANT:
         decision = fast_result.get("decision", "HOLD")
         confidence = fast_result.get("confidence", 50)
         scores = fast_result.get("scores", {})
-        
+        to_sum = (fast_result.get("trend_outlook_summary") or "").strip()
+        overview_report = fast_result.get("summary", "") or ""
+        if to_sum:
+            overview_report = f"{overview_report}\n\n【周期预判】{to_sum}" if overview_report.strip() else f"【周期预判】{to_sum}"
+
         return {
             "overview": {
                 "overallScore": scores.get("overall", 50),
@@ -2085,7 +2509,7 @@ IMPORTANT:
                     "sentiment": scores.get("sentiment", 50),
                     "risk": 100 - confidence,  # Inverse of confidence
                 },
-                "report": fast_result.get("summary", ""),
+                "report": overview_report,
             },
             "fundamental": {
                 "score": scores.get("fundamental", 50),
@@ -2135,6 +2559,8 @@ IMPORTANT:
                 "recommendation": "\n".join(fast_result.get("reasons", [])),
             },
             "fast_analysis": fast_result,  # Include new format for gradual migration
+            "trend_outlook": fast_result.get("trend_outlook"),
+            "trend_outlook_summary": fast_result.get("trend_outlook_summary"),
             "error": None,
         }
 

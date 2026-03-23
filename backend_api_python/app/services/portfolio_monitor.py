@@ -9,6 +9,7 @@ import json
 import threading
 import time
 import traceback
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any, Dict, List, Optional
 
 from app.utils.db import get_db_connection
@@ -16,6 +17,7 @@ from app.utils.logger import get_logger
 from app.services.fast_analysis import get_fast_analysis_service
 from app.services.signal_notifier import SignalNotifier
 from app.services.kline import KlineService
+from app.services.billing_service import get_billing_service
 
 logger = get_logger(__name__)
 
@@ -154,98 +156,92 @@ def _get_positions_for_monitor(position_ids: List[int] = None, user_id: int = No
         return []
 
 
+MAX_PARALLEL_ANALYSIS = 5
+
+
+def _analyze_single_position(pos: Dict[str, Any], language: str) -> Dict[str, Any]:
+    """Analyze a single position (designed to run inside a thread pool)."""
+    market = pos.get('market')
+    symbol = pos.get('symbol')
+    name = pos.get('name') or symbol
+    group_name = pos.get('group_name')
+
+    if not market or not symbol:
+        return {'market': market, 'symbol': symbol, 'name': name, 'error': 'missing market/symbol'}
+
+    try:
+        logger.info(f"Running fast AI analysis for {market}:{symbol}")
+        service = get_fast_analysis_service()
+        analysis_result = service.analyze(
+            market=market, symbol=symbol, language=language, timeframe='1D'
+        )
+
+        detailed = analysis_result.get('detailed_analysis', {})
+        trading_plan = analysis_result.get('trading_plan', {})
+        scores = analysis_result.get('scores', {})
+        risks = analysis_result.get('risks', [])
+        risk_report = '\n'.join([f"• {r}" for r in risks]) if risks else ''
+
+        result = {
+            'market': market, 'symbol': symbol, 'name': name, 'group_name': group_name,
+            'entry_price': pos.get('entry_price'),
+            'current_price': pos.get('current_price') or analysis_result.get('market_data', {}).get('current_price'),
+            'pnl': pos.get('pnl'), 'pnl_percent': pos.get('pnl_percent'),
+            'quantity': pos.get('quantity'), 'side': pos.get('side'),
+            'final_decision': analysis_result.get('decision', 'HOLD'),
+            'confidence': analysis_result.get('confidence', 50),
+            'reasoning': analysis_result.get('summary', ''),
+            'trader_decision': analysis_result.get('decision', 'HOLD'),
+            'trader_reasoning': analysis_result.get('summary', ''),
+            'overview_report': detailed.get('technical', ''),
+            'fundamental_report': detailed.get('fundamental', ''),
+            'sentiment_report': detailed.get('sentiment', ''),
+            'risk_report': risk_report,
+            'suggested_entry': trading_plan.get('entry_price'),
+            'suggested_stop_loss': trading_plan.get('stop_loss'),
+            'suggested_take_profit': trading_plan.get('take_profit'),
+            'technical_score': scores.get('technical', 50),
+            'fundamental_score': scores.get('fundamental', 50),
+            'sentiment_score': scores.get('sentiment', 50),
+            'key_reasons': analysis_result.get('reasons', []),
+            'error': analysis_result.get('error')
+        }
+        logger.info(f"Fast analysis completed for {market}:{symbol}: {analysis_result.get('decision', 'N/A')}")
+        return result
+    except Exception as e:
+        logger.error(f"Failed to analyze {market}:{symbol}: {e}")
+        return {'market': market, 'symbol': symbol, 'name': name, 'error': str(e)}
+
+
 def _run_ai_analysis(positions: List[Dict[str, Any]], config: Dict[str, Any]) -> Dict[str, Any]:
     """
-    Run fast AI analysis on positions.
-    Uses the new FastAnalysisService (single LLM call, faster and more stable).
+    Run fast AI analysis on positions **in parallel** using a thread pool.
     """
     try:
         language = config.get('language', 'en-US')
         custom_prompt = config.get('prompt', '')
-        
-        # Get the fast analysis service
-        service = get_fast_analysis_service()
-        
-        # Analyze each position
-        position_analyses = []
-        
-        for pos in positions:
-            market = pos.get('market')
-            symbol = pos.get('symbol')
-            name = pos.get('name') or symbol
-            group_name = pos.get('group_name')
-            
-            if not market or not symbol:
-                continue
-            
-            try:
-                logger.info(f"Running fast AI analysis for {market}:{symbol}")
-                
-                # Use the new FastAnalysisService (single LLM call)
-                analysis_result = service.analyze(
-                    market=market,
-                    symbol=symbol,
-                    language=language,
-                    timeframe='1D'
-                )
-                
-                # Extract information from the new format
-                detailed = analysis_result.get('detailed_analysis', {})
-                trading_plan = analysis_result.get('trading_plan', {})
-                scores = analysis_result.get('scores', {})
-                
-                # Build risk report from risks list
-                risks = analysis_result.get('risks', [])
-                risk_report = '\n'.join([f"• {r}" for r in risks]) if risks else ''
-                
-                position_analysis = {
-                    'market': market,
-                    'symbol': symbol,
-                    'name': name,
-                    'group_name': group_name,
-                    'entry_price': pos.get('entry_price'),
-                    'current_price': pos.get('current_price') or analysis_result.get('market_data', {}).get('current_price'),
-                    'pnl': pos.get('pnl'),
-                    'pnl_percent': pos.get('pnl_percent'),
-                    'quantity': pos.get('quantity'),
-                    'side': pos.get('side'),
-                    # New fast analysis results
-                    'final_decision': analysis_result.get('decision', 'HOLD'),
-                    'confidence': analysis_result.get('confidence', 50),
-                    'reasoning': analysis_result.get('summary', ''),
-                    'trader_decision': analysis_result.get('decision', 'HOLD'),  # Same as final for fast analysis
-                    'trader_reasoning': analysis_result.get('summary', ''),
-                    'overview_report': detailed.get('technical', ''),
-                    'fundamental_report': detailed.get('fundamental', ''),
-                    'sentiment_report': detailed.get('sentiment', ''),
-                    'risk_report': risk_report,
-                    # Trading plan
-                    'suggested_entry': trading_plan.get('entry_price'),
-                    'suggested_stop_loss': trading_plan.get('stop_loss'),
-                    'suggested_take_profit': trading_plan.get('take_profit'),
-                    # Scores
-                    'technical_score': scores.get('technical', 50),
-                    'fundamental_score': scores.get('fundamental', 50),
-                    'sentiment_score': scores.get('sentiment', 50),
-                    'key_reasons': analysis_result.get('reasons', []),
-                    'error': analysis_result.get('error')
-                }
-                
-                position_analyses.append(position_analysis)
-                logger.info(f"Fast analysis completed for {market}:{symbol}: {analysis_result.get('decision', 'N/A')}")
-                
-            except Exception as e:
-                logger.error(f"Failed to analyze {market}:{symbol}: {e}")
-                position_analyses.append({
-                    'market': market,
-                    'symbol': symbol,
-                    'name': name,
-                    'error': str(e)
-                })
-        
-        # Build comprehensive report
+
+        workers = min(len(positions), MAX_PARALLEL_ANALYSIS)
+        position_analyses: List[Dict[str, Any]] = [None] * len(positions)
+
+        with ThreadPoolExecutor(max_workers=workers) as executor:
+            future_to_idx = {
+                executor.submit(_analyze_single_position, pos, language): idx
+                for idx, pos in enumerate(positions)
+            }
+            for future in as_completed(future_to_idx):
+                idx = future_to_idx[future]
+                try:
+                    position_analyses[idx] = future.result()
+                except Exception as e:
+                    pos = positions[idx]
+                    position_analyses[idx] = {
+                        'market': pos.get('market'), 'symbol': pos.get('symbol'),
+                        'name': pos.get('name') or pos.get('symbol'), 'error': str(e)
+                    }
+
         analysis_report = _build_comprehensive_report(positions, position_analyses, language, custom_prompt)
-        
+
         return {
             'success': True,
             'analysis': analysis_report,
@@ -254,15 +250,11 @@ def _run_ai_analysis(positions: List[Dict[str, Any]], config: Dict[str, Any]) ->
             'analyzed_count': len([p for p in position_analyses if not p.get('error')]),
             'timestamp': _now_ts()
         }
-        
+
     except Exception as e:
         logger.error(f"_run_ai_analysis failed: {e}")
         logger.error(traceback.format_exc())
-        return {
-            'success': False,
-            'error': str(e),
-            'timestamp': _now_ts()
-        }
+        return {'success': False, 'error': str(e), 'timestamp': _now_ts()}
 
 
 def _build_comprehensive_report(
@@ -914,21 +906,66 @@ def run_single_monitor(monitor_id: int, override_language: str = None, user_id: 
         if override_language:
             config['language'] = override_language
         
-        # Get positions for this user
+        # Resolve interval (frontend sends run_interval_minutes, legacy uses interval_minutes)
+        interval_minutes = int(
+            config.get('run_interval_minutes')
+            or config.get('interval_minutes')
+            or 60
+        )
+
+        # Get positions (or build from config.symbol if no position_ids)
         positions = _get_positions_for_monitor(position_ids if position_ids else None, user_id=monitor_user_id)
-        
+
+        # If monitor was created without positions but has symbol in config, build a virtual position
+        if not positions and config.get('symbol'):
+            positions = [{
+                'market': config.get('market', ''),
+                'symbol': config.get('symbol', ''),
+                'name': config.get('symbol', ''),
+                'side': 'long',
+                'quantity': 0,
+                'entry_price': 0,
+                'current_price': 0,
+                'pnl': 0,
+                'pnl_percent': 0,
+            }]
+
         if not positions:
             return {'success': False, 'error': 'No positions to analyze'}
         
+        # ── Billing: charge per symbol analyzed ──
+        billing = get_billing_service()
+        symbol_count = len(positions)
+        per_symbol_cost = billing.get_feature_cost('ai_analysis')
+        total_cost = per_symbol_cost * symbol_count
+
+        if total_cost > 0 and billing.is_billing_enabled():
+            user_credits = billing.get_user_credits(monitor_user_id)
+            if user_credits < total_cost:
+                logger.warning(
+                    f"Monitor #{monitor_id} skipped: insufficient credits "
+                    f"({user_credits} < {total_cost} for {symbol_count} symbols)"
+                )
+                return {
+                    'success': False,
+                    'error': f'Insufficient credits: need {total_cost}, have {user_credits}'
+                }
+            for i in range(symbol_count):
+                pos = positions[i]
+                ok, msg = billing.check_and_consume(
+                    user_id=monitor_user_id,
+                    feature='ai_analysis',
+                    reference_id=f"monitor_{monitor_id}_{pos.get('symbol', '')}"
+                )
+                if not ok:
+                    logger.warning(f"Monitor #{monitor_id} billing failed at symbol #{i+1}: {msg}")
+                    break
+
         # Run analysis based on type
         if monitor_type == 'ai':
             result = _run_ai_analysis(positions, config)
         else:
-            # For other types, we can add price_alert, pnl_alert logic later
             result = {'success': False, 'error': f'Unsupported monitor type: {monitor_type}'}
-        
-        # Update monitor record
-        interval_minutes = int(config.get('interval_minutes') or 60)
         
         with get_db_connection() as db:
             cur = db.cursor()

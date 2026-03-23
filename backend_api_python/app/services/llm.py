@@ -82,11 +82,10 @@ class LLMService:
         
         if provider_name:
             try:
+                # Explicit selection should always be respected.
+                # API key validation happens later in call path.
                 selected = LLMProvider(provider_name.lower())
-                # Verify this provider has an API key configured
-                if self.get_api_key(selected):
-                    return selected
-                logger.warning(f"LLM_PROVIDER={provider_name} but no API key configured, auto-detecting...")
+                return selected
             except ValueError:
                 pass
         
@@ -184,30 +183,35 @@ class LLMService:
 
         response = requests.post(url, headers=headers, json=data, timeout=timeout)
         
-        # Handle errors with detailed messages
-        if response.status_code == 403:
-            error_msg = "OpenRouter API 403 Forbidden"
+        # Handle non-2xx with provider/model-aware details
+        if response.status_code >= 400:
+            provider_name = "OpenRouter" if "openrouter" in (base_url or "").lower() else "LLM"
+            error_msg = f"{provider_name} API {response.status_code}"
+            err_text = ""
             try:
-                error_data = response.json()
-                if "error" in error_data:
-                    error_detail = error_data["error"]
-                    if isinstance(error_detail, dict):
-                        error_msg = f"OpenRouter API 403: {error_detail.get('message', 'Forbidden')}"
-                    elif isinstance(error_detail, str):
-                        error_msg = f"OpenRouter API 403: {error_detail}"
-            except:
-                pass
-            
-            # Check if API key is configured
-            from app.config.api_keys import APIKeys
-            if not APIKeys.OPENROUTER_API_KEY:
-                error_msg += ". OPENROUTER_API_KEY 未配置，请在 backend_api_python/.env 中设置"
-            else:
-                error_msg += ". 可能的原因：1) API 密钥无效或过期 2) 账户余额不足 3) 没有权限访问该模型。请检查 https://openrouter.ai/keys"
-            
+                error_data = response.json() or {}
+                error_detail = error_data.get("error")
+                if isinstance(error_detail, dict):
+                    err_text = str(error_detail.get("message") or "").strip()
+                elif isinstance(error_detail, str):
+                    err_text = error_detail.strip()
+            except Exception:
+                err_text = (response.text or "").strip()[:300]
+
+            if err_text:
+                error_msg = f"{error_msg}: {err_text}"
+
+            # OpenRouter targeted hints
+            if "openrouter" in (base_url or "").lower():
+                from app.config.api_keys import APIKeys
+                if not APIKeys.OPENROUTER_API_KEY:
+                    error_msg += ". OPENROUTER_API_KEY 未配置，请在 backend_api_python/.env 中设置"
+                elif response.status_code == 403:
+                    error_msg += ". 可能原因：API 密钥无效/过期、余额不足、或无模型权限。请检查 https://openrouter.ai/keys"
+                elif response.status_code == 404:
+                    error_msg += ". 可能原因：模型不可用或账户隐私/数据策略限制。请检查 https://openrouter.ai/settings/privacy"
+
             raise ValueError(error_msg)
-        
-        response.raise_for_status()
         
         result = response.json()
         if "choices" in result and len(result["choices"]) > 0:
@@ -369,9 +373,23 @@ class LLMService:
                     logger.debug(f"Auto-detected provider '{provider.value}' from model '{model}'")
         
         p = provider or self.provider
+        cfg = load_addon_config()
+        explicit_provider_name = str(cfg.get('llm', {}).get('provider') or os.getenv('LLM_PROVIDER', '')).strip().lower()
+        explicit_provider = None
+        if explicit_provider_name:
+            try:
+                explicit_provider = LLMProvider(explicit_provider_name)
+            except ValueError:
+                explicit_provider = None
         api_key = self.get_api_key(p)
         
         if not api_key:
+            # If provider is explicitly configured by user, don't silently switch.
+            if explicit_provider is not None and p == explicit_provider:
+                raise ValueError(
+                    f"API key not configured for explicit provider: {p.value}. "
+                    f"Please set {p.value.upper()}_API_KEY in settings."
+                )
             # If no API key for current provider, try to find any available provider
             if try_alternative_providers:
                 for alt_provider in [LLMProvider.DEEPSEEK, LLMProvider.GROK, LLMProvider.OPENAI, LLMProvider.GOOGLE, LLMProvider.OPENROUTER]:

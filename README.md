@@ -294,6 +294,7 @@ Phase 3 (Decision):  🎯 TraderAgent → BUY / SELL / HOLD (with confidence %)
 - **🧠 Memory-Augmented** — Agents learn from past analyses (local RAG, not cloud)
 - **🔌 5+ LLM Providers**: OpenRouter (100+ models), OpenAI, Gemini, DeepSeek, Grok
 - **📊 Polymarket Prediction Markets** — On-demand AI analysis for prediction markets. Input a market link or title → AI analyzes probability divergence, opportunity score, and trading recommendations. Full history tracking and billing integration.
+- **📋 Virtual Position Tracking** — Create virtual positions directly from your watchlist with long/short direction, quantity, and entry price. Real-time PnL calculation without connecting to a real exchange.
 
 ### 📈 Full Trading Lifecycle
 
@@ -340,7 +341,7 @@ Phase 3 (Decision):  🎯 TraderAgent → BUY / SELL / HOLD (with confidence %)
 - **💳 Membership Plans** — Monthly / Yearly / Lifetime tiers with configurable pricing & credits
 - **₿ USDT On-Chain Payment** — TRC20 scan-to-pay, HD Wallet (xpub) per-order addresses, auto-reconciliation via TronGrid
 - **🏪 Indicator Marketplace** — Users publish & sell Python indicators, you take commission
-- **⚙️ Admin Dashboard** — Order management, AI usage stats, user analytics
+- **⚙️ Admin Dashboard** — Order management, AI usage stats, user analytics; settings hot-reload without server restart
 
 ### 🔐 Enterprise-Grade Security
 
@@ -350,48 +351,44 @@ Phase 3 (Decision):  🎯 TraderAgent → BUY / SELL / HOLD (with confidence %)
 - **Demo Mode** — Read-only mode for public showcases
 
 <details>
-<summary><b>🧠 AI Agent Architecture Diagram (Click to expand)</b></summary>
+<summary><b>🧠 AI Analysis Architecture (Click to expand)</b></summary>
+
+Uses **FastAnalysisService** single-LLM flow for speed and multi-factor decisions:
 
 ```mermaid
 flowchart TB
     subgraph Entry["🌐 API Entry"]
-        A["📡 POST /api/analysis/multi"]
-        A2["🔄 POST /api/analysis/reflect"]
+        A["📡 POST /api/fast-analysis/analyze"]
+        A2["📜 GET /api/fast-analysis/history"]
+        A3["📊 GET /api/fast-analysis/similar-patterns"]
     end
-    subgraph Service["⚙️ Service Orchestration"]
-        B[AnalysisService]
-        C[AgentCoordinator]
-        D["📊 Build Context<br/>price · kline · news · indicators"]
+    subgraph Data["📊 Data Layer"]
+        D1[MarketDataCollector]
+        D2["Price · Kline · Macro · News · Fundamentals"]
+        D3["Multi-TF Consensus 1D / 4H / 1H"]
     end
-    subgraph Agents["🤖 7-Agent Workflow"]
-        subgraph P1["📈 Phase 1 · Parallel Analysis"]
-            E1["🔍 MarketAnalyst"]
-            E2["📑 FundamentalAnalyst"]
-            E3["📰 NewsAnalyst"]
-            E4["💭 SentimentAnalyst"]
-            E5["⚠️ RiskAnalyst"]
-        end
-        subgraph P2["🎯 Phase 2 · Bull vs Bear Debate"]
-            F1["🐂 BullResearcher"]
-            F2["🐻 BearResearcher"]
-        end
-        subgraph P3["💹 Phase 3 · Final Decision"]
-            G["🎰 TraderAgent → BUY / SELL / HOLD"]
-        end
+    subgraph Analysis["⚙️ Analysis Layer"]
+        B["FastAnalysisService"]
+        C["Single LLM Call<br/>Constrained Prompt"]
+        E["Objective Score + Multi-TF Consensus"]
+        F["AICalibration Threshold Tuning"]
+        G["BUY / SELL / HOLD"]
     end
-    subgraph Memory["🧠 Local Memory Store"]
-        M1[("Agent Memories (PostgreSQL)")]
+    subgraph Memory["🧠 Memory Layer"]
+        M1[("qd_analysis_memory<br/>PostgreSQL")]
+        M2["RAG Similar-Pattern Retrieval<br/>(optional prompt injection)"]
     end
-    subgraph Reflect["🔄 Reflection Loop"]
-        R[ReflectionService]
-        W["⏰ ReflectionWorker → verify + learn"]
-    end
-    A --> B --> C --> D
-    D --> P1 --> P2 --> P3
-    Agents <-.->|"RAG retrieval"| M1
-    C --> R
-    W -.->|"update memories"| M1
+    A --> B
+    B --> D1 --> D2 --> D3
+    D3 --> C --> E --> F --> G
+    B -.->|"store"| M1
+    M1 -.->|"similar patterns"| M2
+    M2 -.->|"optional context"| C
+    A2 --> M1
+    A3 --> M1
 ```
+
+**Flow:** Data collection → Multi-timeframe consensus → Single LLM call → Calibration override → Store in memory.
 
 </details>
 
@@ -499,7 +496,9 @@ The upper part is for first-time deployment, and the lower "Advanced / rarely ch
 | **Membership** | `MEMBERSHIP_MONTHLY_PRICE_USD`, `MEMBERSHIP_MONTHLY_CREDITS` |
 | **USDT Payment** | `USDT_PAY_ENABLED`, `USDT_TRC20_XPUB`, `TRONGRID_API_KEY` |
 | **Proxy** | `PROXY_URL` |
-| **Workers** | `ENABLE_PENDING_ORDER_WORKER`, `ENABLE_PORTFOLIO_MONITOR` |
+| **Billing** | `BILLING_ENABLED`, `BILLING_COST_AI_ANALYSIS`, `BILLING_COST_AI_CODE_GEN` |
+| **Workers** | `ENABLE_PENDING_ORDER_WORKER`, `ENABLE_PORTFOLIO_MONITOR`, `ENABLE_REFLECTION_WORKER` |
+| **AI Tuning** | `ENABLE_AI_ENSEMBLE`, `ENABLE_CONFIDENCE_CALIBRATION`, `AI_ENSEMBLE_MODELS` |
 
 </details>
 
