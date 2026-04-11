@@ -48,6 +48,15 @@ The current `v3.0.1` release aligns frontend/runtime versioning, refreshes the p
 - Exchange signup/referral links are now documented consistently with the in-app "Open account" entry.
 - Backtest Center UI polish continues the recent strategy-backtest productization work introduced in earlier `2.2.x` releases.
 
+## Open Source Repositories
+
+To make the project easier to navigate, the current public repositories are:
+
+| Repository | Purpose |
+|------------|---------|
+| [QuantDinger](https://github.com/brokermr810/QuantDinger) | Main repository: backend, deployment stack, docs, prebuilt frontend delivery |
+| [QuantDinger Frontend](https://github.com/brokermr810/QuantDinger-Vue) | Vue.js frontend source repository for UI development and customization |
+
 ## Product Capabilities
 
 ### 1. AI Research and Decision Support
@@ -115,21 +124,12 @@ The current `v3.0.1` release aligns frontend/runtime versioning, refreshes the p
     </td>
   </tr>
   <tr>
-    <td colspan="2" align="center">
-      <img src="docs/screenshots/dashboard.png" alt="Dashboard" width="90%" style="border-radius: 8px;">
-      <br/><sub>Unified dashboard for research, execution, and operations</sub>
-    </td>
+    <td width="50%" align="center"><img src="docs/screenshots/v31.png" alt="Indicator IDE" style="border-radius: 6px;"><br/><sub>Indicator IDE, charting, backtest, and quick trade</sub></td>
+    <td width="50%" align="center"><img src="docs/screenshots/v32.png" alt="AI Asset Analysis" style="border-radius: 6px;"><br/><sub>AI asset analysis and opportunity radar</sub></td>
   </tr>
   <tr>
-    <td width="50%" align="center"><img src="docs/screenshots/ai_analysis1.png" alt="AI Analysis" style="border-radius: 6px;"><br/><sub>AI analysis workspace</sub></td>
-    <td width="50%" align="center"><img src="docs/screenshots/trading_assistant.png" alt="Trading Assistant" style="border-radius: 6px;"><br/><sub>Trading assistant and execution flow</sub></td>
-  </tr>
-  <tr>
-    <td align="center"><img src="docs/screenshots/indicator_analysis.png" alt="Indicator Analysis" style="border-radius: 6px;"><br/><sub>Indicator and chart analysis</sub></td>
-    <td align="center"><img src="docs/screenshots/indicator_creat_python_code.png" alt="Code Generation" style="border-radius: 6px;"><br/><sub>AI-assisted Python strategy generation</sub></td>
-  </tr>
-  <tr>
-    <td colspan="2" align="center"><img src="docs/screenshots/portfolio.jpg" alt="Portfolio Monitor" style="border-radius: 6px; max-width: 80%;"><br/><sub>Portfolio monitoring</sub></td>
+    <td align="center"><img src="docs/screenshots/v33.png" alt="Trading Bots" style="border-radius: 6px;"><br/><sub>Trading bot workspace and automation templates</sub></td>
+    <td align="center"><img src="docs/screenshots/v34.png" alt="Strategy Live" style="border-radius: 6px;"><br/><sub>Strategy live operations, performance, and monitoring</sub></td>
   </tr>
 </table>
 
@@ -232,6 +232,64 @@ Polymarket is supported as an **analysis workflow**, including market lookup, di
 | AI layer | LLM provider integration, memory, calibration, optional workers |
 | Billing | Membership, credits, USDT TRC20 payment flow |
 | Deployment | Docker Compose with health checks |
+
+### System Architecture Diagram
+
+```mermaid
+flowchart LR
+    U[Trader / Operator / Researcher]
+
+    subgraph FE[Frontend Layer]
+        WEB[Vue Web App]
+        NG[Nginx Delivery]
+    end
+
+    subgraph BE[Application Layer]
+        API[Flask API Gateway]
+        AI[AI Analysis Services]
+        STRAT[Strategy / Backtest Engine]
+        EXEC[Execution and Quick Trade]
+        BILL[Billing / Membership / Orders]
+    end
+
+    subgraph DATA[State and Data Layer]
+        PG[(PostgreSQL 16)]
+        REDIS[(Redis 7)]
+        FILES[Logs / Runtime Data]
+    end
+
+    subgraph EXT[External Integrations]
+        LLM[LLM Providers]
+        EXCH[Crypto Exchanges]
+        BROKER[IBKR / MT5]
+        MARKET[Market Data / News]
+        PAY[TronGrid / USDT Payment]
+        NOTIFY[Telegram / Email / SMS / Webhook]
+    end
+
+    U --> WEB
+    WEB --> NG --> API
+    API --> AI
+    API --> STRAT
+    API --> EXEC
+    API --> BILL
+
+    AI --> PG
+    STRAT --> PG
+    EXEC --> PG
+    BILL --> PG
+    API --> REDIS
+    API --> FILES
+
+    AI --> LLM
+    AI --> MARKET
+    EXEC --> EXCH
+    EXEC --> BROKER
+    BILL --> PAY
+    API --> NOTIFY
+```
+
+This is the practical system boundary of QuantDinger: a self-hosted application core, backed by PostgreSQL and Redis, connected outward to model providers, exchanges, brokers, market-data services, and payment/notification infrastructure.
 
 ```text
 ┌──────────────────────────────────────────────┐
@@ -341,13 +399,25 @@ The same links are also available inside the web application under **Profile -> 
 ## License and Commercial Terms
 
 - Backend source code is licensed under **Apache License 2.0**. See `LICENSE`.
-- Frontend UI is distributed here as **prebuilt files**.
-- Trademark and branding usage are governed separately. See `TRADEMARKS.md`.
+- This repository distributes the frontend UI here as **prebuilt files** for integrated deployment.
+- The frontend source code is available separately at [QuantDinger Frontend](https://github.com/brokermr810/QuantDinger-Vue) under the **QuantDinger Frontend Source-Available License v1.0**.
+- Under that frontend license, Non-Commercial Use and eligible Qualified Non-Profit Entity use are permitted free of charge, while Commercial Use requires a separate commercial license from the copyright holder.
+- Trademark, branding, attribution, and watermark usage are governed separately and may not be removed or altered without permission. See `TRADEMARKS.md`.
 
 For commercial licensing, frontend source access, branding authorization, or deployment support:
 
+- Website: [quantdinger.com](https://quantdinger.com)
 - Telegram: [t.me/worldinbroker](https://t.me/worldinbroker)
 - Email: [brokermr810@gmail.com](mailto:brokermr810@gmail.com)
+
+## Legal Notice and Compliance
+
+- QuantDinger is provided for lawful research, education, system development, and compliant trading or operational use only.
+- No individual or organization may use this software, any derivative work, or any related service for unlawful, fraudulent, abusive, deceptive, market-manipulative, sanctions-violating, money-laundering, or other prohibited activity.
+- Any commercial use, deployment, operation, resale, or service offering based on QuantDinger must comply with all applicable laws, regulations, licensing requirements, sanctions rules, tax rules, data-protection rules, consumer-protection rules, and market or exchange rules in the jurisdictions where it is used.
+- Users are solely responsible for determining whether their use of the software is lawful in their country or region, and for obtaining any approvals, registrations, disclosures, or professional advice required by applicable law.
+- QuantDinger, its copyright holders, contributors, licensors, maintainers, and affiliated open-source participants do not provide legal, tax, investment, compliance, or regulatory advice.
+- To the maximum extent permitted by applicable law, QuantDinger and all related contributors and rights holders disclaim responsibility and liability for any unlawful use, regulatory breach, trading loss, service interruption, enforcement action, or other consequence arising from the use or misuse of the software.
 
 ## Community and Support
 
@@ -368,5 +438,20 @@ Crypto donations:
 ```text
 0x96fa4962181bea077f8c7240efe46afbe73641a7
 ```
+
+## Acknowledgements
+
+QuantDinger stands on top of a strong open-source ecosystem. Special thanks to projects such as:
+
+- [Flask](https://flask.palletsprojects.com/)
+- [Pandas](https://pandas.pydata.org/)
+- [CCXT](https://github.com/ccxt/ccxt)
+- [yfinance](https://github.com/ranaroussi/yfinance)
+- [Vue.js](https://vuejs.org/)
+- [Ant Design Vue](https://antdv.com/)
+- [KLineCharts](https://github.com/klinecharts/KLineChart)
+- [ECharts](https://echarts.apache.org/)
+- [Capacitor](https://capacitorjs.com/)
+- [bip-utils](https://github.com/ebellocchia/bip_utils)
 
 <p align="center"><sub>If QuantDinger is useful to you, a GitHub star helps the project a lot.</sub></p>
