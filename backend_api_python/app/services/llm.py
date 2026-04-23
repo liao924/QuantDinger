@@ -23,6 +23,7 @@ class LLMProvider(Enum):
     GOOGLE = "google"
     DEEPSEEK = "deepseek"
     GROK = "grok"
+    CUSTOM = "custom"
 
 
 # Provider configurations
@@ -51,6 +52,11 @@ PROVIDER_CONFIGS = {
         "base_url": "https://api.x.ai/v1",
         "default_model": "grok-beta",
         "fallback_model": "grok-beta",
+    },
+    LLMProvider.CUSTOM: {
+        "base_url": "",  # User configured via CUSTOM_API_URL
+        "default_model": "",  # User configured via CUSTOM_MODEL
+        "fallback_model": "",
     },
 }
 
@@ -117,6 +123,7 @@ class LLMService:
             LLMProvider.GOOGLE: APIKeys.GOOGLE_API_KEY,
             LLMProvider.DEEPSEEK: APIKeys.DEEPSEEK_API_KEY,
             LLMProvider.GROK: APIKeys.GROK_API_KEY,
+            LLMProvider.CUSTOM: APIKeys.CUSTOM_API_KEY,
         }
         return key_map.get(p, "") or ""
 

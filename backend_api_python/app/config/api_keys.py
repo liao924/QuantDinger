@@ -99,6 +99,36 @@ class MetaAPIKeys(type):
         from app.utils.config_loader import load_addon_config
         val = load_addon_config().get('grok', {}).get('api_key')
         return val if val else ''
+
+    @property
+    def CUSTOM_API_KEY(cls):
+        """Custom LLM API key (for OpenAI-compatible custom endpoints)"""
+        env_val = os.getenv('CUSTOM_API_KEY', '').strip()
+        if env_val:
+            return env_val
+        from app.utils.config_loader import load_addon_config
+        val = load_addon_config().get('custom', {}).get('api_key')
+        return val if val else ''
+
+    @property
+    def CUSTOM_API_URL(cls):
+        """Custom LLM API base URL (e.g., https://your-api.com/v1)"""
+        env_val = os.getenv('CUSTOM_API_URL', '').strip()
+        if env_val:
+            return env_val
+        from app.utils.config_loader import load_addon_config
+        val = load_addon_config().get('custom', {}).get('base_url')
+        return val if val else ''
+
+    @property
+    def CUSTOM_MODEL(cls):
+        """Custom LLM model name"""
+        env_val = os.getenv('CUSTOM_MODEL', '').strip()
+        if env_val:
+            return env_val
+        from app.utils.config_loader import load_addon_config
+        val = load_addon_config().get('custom', {}).get('model')
+        return val if val else ''
     
     @property
     def TAVILY_API_KEYS(cls):

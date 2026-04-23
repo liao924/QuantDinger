@@ -131,6 +131,7 @@ CONFIG_SCHEMA = {
                     {'value': 'google', 'label': 'Google Gemini'},
                     {'value': 'deepseek', 'label': 'DeepSeek'},
                     {'value': 'grok', 'label': 'xAI Grok'},
+                    {'value': 'custom', 'label': 'Custom API (OpenAI-compatible)'},
                 ],
                 'description': 'Select your preferred LLM provider'
             },
@@ -262,6 +263,31 @@ CONFIG_SCHEMA = {
                 'default': 'https://api.x.ai/v1',
                 'description': 'xAI Grok API endpoint',
                 'group': 'grok'
+            },
+            # Custom API (OpenAI-compatible)
+            {
+                'key': 'CUSTOM_API_URL',
+                'label': 'Custom API URL',
+                'type': 'text',
+                'default': '',
+                'description': 'Your custom API endpoint (OpenAI-compatible, e.g. https://api.example.com/v1)',
+                'group': 'custom'
+            },
+            {
+                'key': 'CUSTOM_API_KEY',
+                'label': 'Custom API Key',
+                'type': 'password',
+                'required': False,
+                'description': 'API key for your custom endpoint',
+                'group': 'custom'
+            },
+            {
+                'key': 'CUSTOM_MODEL',
+                'label': 'Custom Model',
+                'type': 'text',
+                'default': '',
+                'description': 'Model name to use (e.g. gpt-4o, claude-3-opus)',
+                'group': 'custom'
             },
             # Common settings
             {
