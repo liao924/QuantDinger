@@ -19,8 +19,7 @@ cd quantdinger
 cp backend_api_python/env.example backend_api_python/.env
 # Edit .env — at minimum set SECRET_KEY to a random value:
 #   SECRET_KEY=$(python3 -c "import secrets; print(secrets.token_hex(32))")
-# Optional (mainland / no VPN): copy `.env.example` at repo root to `.env` and set
-# `IMAGE_PREFIX`, `USE_CN_MIRROR=1`, `PIP_INDEX_URL` — see that file and docker-compose header.
+# Optional: project-root `.env` with `IMAGE_PREFIX` if Docker Hub pulls are slow (see .env.example).
 
 # 3. Launch
 docker compose up -d --build
