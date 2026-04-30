@@ -8,13 +8,20 @@
   <p><strong>One deployable stack for charting, AI market research, Python indicators &amp; strategies, backtests, and live execution—on your own servers and your own keys.</strong></p>
   <p><em>Self-hosted quantitative platform: from idea and AI-assisted coding to paper-style workflows and exchange-connected live trading, with optional multi-user and billing primitives for operators.</em></p>
 
-  <p>
+  <p style="margin-top: 1rem; margin-bottom: 0; line-height: 2;">
     <a href="README.md"><strong>English</strong></a> &nbsp;·&nbsp;
-    <a href="docs/README_CN.md"><strong>简体中文</strong></a> &nbsp;·&nbsp;
-    <a href="https://ai.quantdinger.com"><strong>Live Demo</strong></a> &nbsp;·&nbsp;
-    <a href="https://www.youtube.com/watch?v=tNAZ9uMiUUw"><strong>Video Demo</strong></a> &nbsp;·&nbsp;
-    <a href="https://www.quantdinger.com"><strong>Website</strong></a> &nbsp;·&nbsp;
-    <a href="https://aws.amazon.com/marketplace/pp/prodview-naanrb7d2mbc6"><strong>AWS Marketplace</strong></a> <em>(AMI, one-click cloud)</em> &nbsp;·&nbsp;
+    <a href="docs/README_CN.md"><strong>简体中文</strong></a>
+    <span style="color: #8b949e; user-select: none;"> &nbsp;|&nbsp; </span>
+    <a href="https://ai.quantdinger.com"><strong>SaaS</strong></a><small style="color: #656d76; font-weight: normal;"> — official cloud</small>
+    &nbsp;·&nbsp;
+    <a href="https://www.youtube.com/watch?v=tNAZ9uMiUUw"><strong>Video Demo</strong></a>
+    &nbsp;·&nbsp;
+    <a href="https://www.quantdinger.com"><strong>Website</strong></a>
+    &nbsp;·&nbsp;
+    <a href="https://aws.amazon.com/marketplace/pp/prodview-naanrb7d2mbc6"><strong>AWS Marketplace</strong></a><small style="color: #656d76; font-weight: normal;"> — AMI</small>
+  </p>
+  <p style="margin-top: 1rem; margin-bottom: 0; line-height: 2;">
+    <small style="color: #656d76; text-transform: uppercase; letter-spacing: 0.12em; display: block; margin-bottom: 0.35rem;">Community</small>
     <a href="https://t.me/quantdinger"><strong>Telegram</strong></a> &nbsp;·&nbsp;
     <a href="https://discord.com/invite/tyx5B6TChr"><strong>Discord</strong></a> &nbsp;·&nbsp;
     <a href="https://youtube.com/@quantdinger"><strong>YouTube</strong></a>
@@ -697,7 +704,7 @@ For commercial licensing, frontend source access, branding authorization, or dep
 
 ## Start Here
 
-- **Want to see the product first?** Open the [Live Demo](https://ai.quantdinger.com) or watch the [Video Demo](https://www.youtube.com/watch?v=tNAZ9uMiUUw).
+- **Want to see the product first?** Open the [official SaaS](https://ai.quantdinger.com) or watch the [Video Demo](https://www.youtube.com/watch?v=tNAZ9uMiUUw).
 - **Want to self-host quickly?** Use [Try in 2 minutes](#try-in-2-minutes) for a one-liner, then follow [Installation & first-time setup](#installation--first-time-setup-docker-compose) for the full checklist.
 - **Want to build strategies?** Read the [Strategy Development Guide](docs/STRATEGY_DEV_GUIDE.md). Example scripts live in [`docs/examples/`](docs/examples/) and are kept aligned with the guide.
 - **Want cloud or production deployment?** Use the [Cloud Deployment Guide](docs/CLOUD_DEPLOYMENT_EN.md).

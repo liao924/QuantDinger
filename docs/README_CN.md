@@ -8,13 +8,20 @@
   <p><strong>图表研究、AI 市场分析、Python 指标与策略、回测与实盘执行，一套可部署栈全搞定——跑在你自己的机器上，用你自己的 API 密钥。</strong></p>
   <p><em>可自托管量化平台：从想法与 AI 辅助写码，到回测与接交易所的实盘；可选多用户、积分与计费能力，方便团队运营落地。</em></p>
 
-  <p>
+  <p style="margin-top: 1rem; margin-bottom: 0; line-height: 2;">
     <a href="../README.md"><strong>English</strong></a> &nbsp;·&nbsp;
-    <a href="README_CN.md"><strong>简体中文</strong></a> &nbsp;·&nbsp;
-    <a href="https://ai.quantdinger.com"><strong>在线演示</strong></a> &nbsp;·&nbsp;
-    <a href="https://www.youtube.com/watch?v=tNAZ9uMiUUw"><strong>视频演示</strong></a> &nbsp;·&nbsp;
-    <a href="https://www.quantdinger.com"><strong>官网</strong></a> &nbsp;·&nbsp;
-    <a href="https://aws.amazon.com/marketplace/pp/prodview-naanrb7d2mbc6"><strong>AWS Marketplace</strong></a> <em>（AMI 一键上云）</em> &nbsp;·&nbsp;
+    <a href="README_CN.md"><strong>简体中文</strong></a>
+    <span style="color: #8b949e; user-select: none;"> &nbsp;|&nbsp; </span>
+    <a href="https://ai.quantdinger.com"><strong>SaaS</strong></a><small style="color: #656d76; font-weight: normal;"> — 官方云上版</small>
+    &nbsp;·&nbsp;
+    <a href="https://www.youtube.com/watch?v=tNAZ9uMiUUw"><strong>视频演示</strong></a>
+    &nbsp;·&nbsp;
+    <a href="https://www.quantdinger.com"><strong>官网</strong></a>
+    &nbsp;·&nbsp;
+    <a href="https://aws.amazon.com/marketplace/pp/prodview-naanrb7d2mbc6"><strong>AWS Marketplace</strong></a><small style="color: #656d76; font-weight: normal;"> — AMI</small>
+  </p>
+  <p style="margin-top: 1rem; margin-bottom: 0; line-height: 2;">
+    <small style="color: #656d76; letter-spacing: 0.08em; display: block; margin-bottom: 0.35rem;">社区与联系</small>
     <a href="https://t.me/quantdinger"><strong>Telegram</strong></a> &nbsp;·&nbsp;
     <a href="https://discord.com/invite/tyx5B6TChr"><strong>Discord</strong></a> &nbsp;·&nbsp;
     <a href="https://youtube.com/@quantdinger"><strong>YouTube</strong></a>
@@ -684,7 +691,7 @@ QuantDinger/
 
 ## 从这里开始
 
-- **想先看产品效果？** 先打开[在线演示](https://ai.quantdinger.com)或观看[视频演示](https://www.youtube.com/watch?v=tNAZ9uMiUUw)。
+- **想先看产品效果？** 打开[官方 SaaS](https://ai.quantdinger.com)或观看[视频演示](https://www.youtube.com/watch?v=tNAZ9uMiUUw)。
 - **想尽快自己部署？** 先看 [两分钟试用](#两分钟试用) 里的一条命令，再按 [安装与首次运行](#安装与首次运行) 逐项检查。
 - **想开始写策略？** 先看[策略开发指南](STRATEGY_DEV_GUIDE_CN.md)。示例代码位于 [`examples/`](examples/)，并已与开发指南保持同步。
 - **想上云或生产部署？** 看[云服务器部署文档](CLOUD_DEPLOYMENT_CN.md)。
