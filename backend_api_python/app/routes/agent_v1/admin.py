@@ -137,8 +137,16 @@ def issue_token():
                 paper_only, rate_limit, expires_at,
             ),
         )
-        row = cur.fetchone()
+        # NOTE: app.utils.db_postgres' PostgresCursor wrapper silently
+        # consumes the RETURNING row into its internal `_last_insert_id`
+        # attribute, so cur.fetchone() here returns None.  Re-fetch via
+        # SELECT on the unique token_hash to recover id + created_at.
         db.commit()
+        cur.execute(
+            "SELECT id, created_at FROM qd_agent_tokens WHERE token_hash = %s",
+            (token_hash,),
+        )
+        row = cur.fetchone()
         cur.close()
 
     return envelope({
