@@ -3,28 +3,34 @@ Alpaca Markets API Routes
 
 Standalone API endpoints for US stocks, ETFs, and crypto trading via Alpaca.
 Mirrors the structure of routes/ibkr.py for consistency.
+
+Multi-tenancy: connections are isolated per authenticated user via
+:class:`BrokerSessionRegistry` instead of a process-wide global, so users
+cannot accidentally place orders through someone else's Alpaca account.
 """
 
 from flask import Blueprint, request, jsonify
 from app.utils.auth import login_required
 from app.utils.logger import get_logger
+from app.utils.broker_session import BrokerSessionRegistry
 from app.services.alpaca_trading import AlpacaClient, AlpacaConfig
-from app.services.alpaca_trading.client import get_alpaca_client, reset_alpaca_client
 
 logger = get_logger(__name__)
 
 alpaca_bp = Blueprint('alpaca', __name__)
 
-# Global client instance (lazy-init on first request)
-_client: AlpacaClient = None
+# Per-user client cache keyed by (user_id, 'alpaca')
+_sessions = BrokerSessionRegistry('alpaca')
 
 
-def _get_client() -> AlpacaClient:
-    """Get current client instance."""
-    global _client
-    if _client is None:
-        _client = get_alpaca_client()
-    return _client
+def _placeholder_status():
+    """Return a stable 'not connected' status when no client exists yet."""
+    return {
+        "connected": False,
+        "paper": True,
+        "base_url": "https://paper-api.alpaca.markets",
+        "account_id": None,
+    }
 
 
 # ==================== Connection Management ====================
@@ -34,7 +40,9 @@ def _get_client() -> AlpacaClient:
 def get_status():
     """Get connection status. GET /api/alpaca/status"""
     try:
-        client = _get_client()
+        client = _sessions.get()
+        if client is None:
+            return jsonify({"success": True, "data": _placeholder_status()})
         return jsonify({"success": True, "data": client.get_connection_status()})
     except Exception as e:
         logger.error(f"Get status failed: {e}")
@@ -53,7 +61,6 @@ def connect():
         "baseUrl": ""             // Optional, override
     }
     """
-    global _client
     try:
         data = request.get_json() or {}
         api_key = data.get('apiKey', '')
@@ -68,17 +75,14 @@ def connect():
             base_url=data.get('baseUrl') or None,
         )
 
-        # Disconnect existing connection
-        if _client is not None and _client.connected:
-            _client.disconnect()
-
-        _client = AlpacaClient(config)
-        success = _client.connect()
+        client = AlpacaClient(config)
+        success = client.connect()
         if success:
+            _sessions.set(client)
             return jsonify({
                 "success": True,
                 "message": "Connected successfully",
-                "data": _client.get_connection_status(),
+                "data": client.get_connection_status(),
             })
         return jsonify({
             "success": False,
@@ -98,12 +102,8 @@ def connect():
 @login_required
 def disconnect():
     """Disconnect from Alpaca. POST /api/alpaca/disconnect"""
-    global _client
     try:
-        if _client is not None:
-            _client.disconnect()
-            _client = None
-        reset_alpaca_client()
+        _sessions.disconnect_current()
         return jsonify({"success": True, "message": "Disconnected"})
     except Exception as e:
         logger.error(f"Disconnect failed: {e}")
@@ -112,14 +112,21 @@ def disconnect():
 
 # ==================== Account Queries ====================
 
+def _require_connected_client():
+    client = _sessions.get()
+    if client is None or not client.connected:
+        return None, (jsonify({"success": False, "error": "Not connected to Alpaca"}), 400)
+    return client, None
+
+
 @alpaca_bp.route('/account', methods=['GET'])
 @login_required
 def get_account():
     """Get account information. GET /api/alpaca/account"""
     try:
-        client = _get_client()
-        if not client.connected:
-            return jsonify({"success": False, "error": "Not connected to Alpaca"}), 400
+        client, err = _require_connected_client()
+        if err is not None:
+            return err
         return jsonify({"success": True, "data": client.get_account_summary()})
     except Exception as e:
         logger.error(f"Get account info failed: {e}")
@@ -131,9 +138,9 @@ def get_account():
 def get_positions():
     """Get positions. GET /api/alpaca/positions"""
     try:
-        client = _get_client()
-        if not client.connected:
-            return jsonify({"success": False, "error": "Not connected to Alpaca"}), 400
+        client, err = _require_connected_client()
+        if err is not None:
+            return err
         return jsonify({"success": True, "data": client.get_positions()})
     except Exception as e:
         logger.error(f"Get positions failed: {e}")
@@ -145,9 +152,9 @@ def get_positions():
 def get_orders():
     """Get open orders. GET /api/alpaca/orders"""
     try:
-        client = _get_client()
-        if not client.connected:
-            return jsonify({"success": False, "error": "Not connected to Alpaca"}), 400
+        client, err = _require_connected_client()
+        if err is not None:
+            return err
         return jsonify({"success": True, "data": client.get_open_orders()})
     except Exception as e:
         logger.error(f"Get orders failed: {e}")
@@ -172,9 +179,9 @@ def place_order():
     }
     """
     try:
-        client = _get_client()
-        if not client.connected:
-            return jsonify({"success": False, "error": "Not connected to Alpaca"}), 400
+        client, err = _require_connected_client()
+        if err is not None:
+            return err
 
         data = request.get_json() or {}
         symbol = data.get('symbol')
@@ -223,9 +230,9 @@ def place_order():
 def cancel_order(order_id):
     """Cancel order. DELETE /api/alpaca/order/<order_id>"""
     try:
-        client = _get_client()
-        if not client.connected:
-            return jsonify({"success": False, "error": "Not connected to Alpaca"}), 400
+        client, err = _require_connected_client()
+        if err is not None:
+            return err
         ok = client.cancel_order(order_id)
         return jsonify({"success": ok, "message": "Cancelled" if ok else "Cancel failed"})
     except Exception as e:
@@ -240,9 +247,9 @@ def cancel_order(order_id):
 def get_quote(symbol):
     """Get real-time quote. GET /api/alpaca/quote/<symbol>?marketType=USStock"""
     try:
-        client = _get_client()
-        if not client.connected:
-            return jsonify({"success": False, "error": "Not connected to Alpaca"}), 400
+        client, err = _require_connected_client()
+        if err is not None:
+            return err
         market_type = request.args.get('marketType', 'USStock')
         result = client.get_quote(symbol, market_type=market_type)
         if result.get('success'):
