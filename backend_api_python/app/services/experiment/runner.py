@@ -897,8 +897,27 @@ class ExperimentRunnerService:
 
     @staticmethod
     def _build_best_output(best: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+        """Shape the best candidate for the frontend.
+
+        Includes both IS (training-window) and, when available, OOS
+        (held-out 30% window) summaries so the UI can show them side
+        by side. Previously only IS was returned, which made the
+        headline +X% return look like the candidate's real expected
+        performance and led to surprises when users re-ran the
+        candidate on the full window.
+        """
         if not best:
             return None
+        result = best.get('result') or {}
+        oos_result = best.get('oosResult') or {}
+        oos_summary = None
+        if oos_result:
+            oos_summary = {
+                'totalReturn': oos_result.get('totalReturn'),
+                'maxDrawdown': oos_result.get('maxDrawdown'),
+                'sharpeRatio': oos_result.get('sharpeRatio'),
+                'totalTrades': oos_result.get('totalTrades'),
+            }
         return {
             'name': best.get('name'),
             'score': best.get('score'),
@@ -906,9 +925,13 @@ class ExperimentRunnerService:
             'overrides': best.get('overrides'),
             'snapshot': best.get('snapshot'),
             'summary': {
-                'totalReturn': (best.get('result') or {}).get('totalReturn'),
-                'maxDrawdown': (best.get('result') or {}).get('maxDrawdown'),
-                'sharpeRatio': (best.get('result') or {}).get('sharpeRatio'),
-                'totalTrades': (best.get('result') or {}).get('totalTrades'),
+                'totalReturn': result.get('totalReturn'),
+                'maxDrawdown': result.get('maxDrawdown'),
+                'sharpeRatio': result.get('sharpeRatio'),
+                'totalTrades': result.get('totalTrades'),
             },
+            'oosSummary': oos_summary,
+            'oosScore': best.get('oosScore'),
+            'oosDegradation': best.get('oosDegradation'),
+            'oosOverfit': bool(best.get('oosOverfit')),
         }
