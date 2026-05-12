@@ -67,10 +67,12 @@ def analyze_polymarket():
         slug = None
         
         # 尝试从URL中提取
+        # `(?:/[a-z]{2}(?:-[A-Z]{2})?)?` 兼容Polymarket的语言前缀，例如 /zh/、/en/、/zh-CN/。
+        # `([^/?#]+)` 截到下一个 /、?、# 之前。
         url_patterns = [
-            r'polymarket\.com/event/([^/?]+)',
-            r'polymarket\.com/markets/(\d+)',
-            r'polymarket\.com/market/(\d+)',
+            r'polymarket\.com(?:/[a-z]{2}(?:-[A-Z]{2})?)?/event/([^/?#]+)',
+            r'polymarket\.com(?:/[a-z]{2}(?:-[A-Z]{2})?)?/markets/(\d+)',
+            r'polymarket\.com(?:/[a-z]{2}(?:-[A-Z]{2})?)?/market/(\d+)',
         ]
         
         for pattern in url_patterns:
@@ -94,6 +96,14 @@ def analyze_polymarket():
             market = polymarket_source.get_market_details(slug)
             if market and not market_id:
                 market_id = market.get('market_id')
+        elif 'polymarket.com' in input_text.lower():
+            # 看起来是个polymarket URL但正则没抓到 —— 不要回退到fuzzy title search
+            # （那会把整段URL当作关键词去打分，必然返回无关结果）
+            return jsonify({
+                "code": 0,
+                "msg": "Could not parse a market slug from this Polymarket URL. Please paste the URL directly from a market page (looks like https://polymarket.com/event/<slug>).",
+                "data": None
+            }), 400
         else:
             # 用户输入的不是URL，按标题做关键词搜索；只有"足够确信"才接受
             logger.info(f"Searching for market by title: {input_text[:100]}")
