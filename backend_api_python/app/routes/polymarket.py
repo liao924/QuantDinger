@@ -285,13 +285,10 @@ def get_polymarket_history():
             market_data = result_data.get('market', {})
             analysis_data = result_data.get('analysis', {})
             
+            # SafeJSONProvider normalizes datetimes to UTC ISO automatically.
             created_at = row.get('created_at')
             completed_at = row.get('completed_at')
-            if created_at and hasattr(created_at, 'isoformat'):
-                created_at = created_at.isoformat()
-            if completed_at and hasattr(completed_at, 'isoformat'):
-                completed_at = completed_at.isoformat()
-            
+
             items.append({
                 'id': row.get('id'),
                 'market_id': row.get('market_id'),
