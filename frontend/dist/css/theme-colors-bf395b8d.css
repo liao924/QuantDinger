@@ -400,25 +400,25 @@ body.dark .usdt-checkout .checkout-body .info-section .addr-box .copy-btn:hover,
 .agent-tokens-page.theme-dark[data-v-14bb9f0a] .ant-tabs-ink-bar{background-color:#1890ff}
 .agent-tokens-page.theme-dark[data-v-14bb9f0a] .ant-pagination-item-active{border-color:#1890ff}
 .agent-tokens-page.theme-dark[data-v-14bb9f0a] .ant-pagination-item-active a{color:#1890ff}
-.settings-page .settings-header .page-title .anticon[data-v-013a967f]{color:#1890ff}
-.settings-page .settings-nav .settings-menu[data-v-013a967f] .ant-menu-item:hover{background:rgba(24,144,255,.06);color:#1890ff}
-.settings-page .settings-nav .settings-menu[data-v-013a967f] .ant-menu-item:hover .anticon{color:#1890ff}
-.settings-page .settings-nav .settings-menu[data-v-013a967f] .ant-menu-item.ant-menu-item-selected{background:linear-gradient(135deg,rgba(24,144,255,.1),rgba(19,194,194,.08));color:#1890ff}
-.settings-page .settings-nav .settings-menu[data-v-013a967f] .ant-menu-item.ant-menu-item-selected .anticon{color:#1890ff}
-.settings-page .settings-detail .detail-header .detail-icon[data-v-013a967f]{color:#1890ff}
-.settings-page .settings-detail .search-result-group-tag[data-v-013a967f]{background:rgba(24,144,255,.08);color:#1890ff}
-.settings-page .commercial-license-notice .contact-link[data-v-013a967f]{color:#1890ff}
-.settings-page .commercial-license-notice .contact-link[data-v-013a967f]:hover{color:#096dd9}
-.settings-page .openrouter-balance-card .ant-card[data-v-013a967f]{background:linear-gradient(135deg,#e6f7ff,#f0f5ff);border:1px solid #91d5ff}
-.settings-page .openrouter-balance-card .balance-header .balance-title[data-v-013a967f]{color:#1890ff}
-.settings-page .settings-form[data-v-013a967f] .ant-form-item-label .form-label-with-tooltip .help-icon:hover{color:#1890ff}
-.settings-page .settings-form[data-v-013a967f] .ant-form-item-label .form-label-with-tooltip .api-link{color:#1890ff;background:rgba(24,144,255,.08)}
-.settings-page .settings-form[data-v-013a967f] .ant-form-item-label .form-label-with-tooltip .api-link:hover{background:rgba(24,144,255,.15)}
-.settings-page.theme-dark .commercial-license-notice .contact-link[data-v-013a967f]{color:#69c0ff}
-.settings-page.theme-dark .commercial-license-notice .contact-link[data-v-013a967f]:hover{color:#91d5ff}
-.settings-page.theme-dark .settings-form[data-v-013a967f] .ant-form-item-label .form-label-with-tooltip .api-link{background:rgba(24,144,255,.15)}
-.settings-page.theme-dark .settings-form[data-v-013a967f] .ant-form-item-label .form-label-with-tooltip .api-link:hover{background:rgba(24,144,255,.25)}
-.settings-page.theme-dark .settings-form[data-v-013a967f] .ant-input-number:focus,.settings-page.theme-dark .settings-form[data-v-013a967f] .ant-input-number:hover,.settings-page.theme-dark .settings-form[data-v-013a967f] .ant-input-password:focus,.settings-page.theme-dark .settings-form[data-v-013a967f] .ant-input-password:hover,.settings-page.theme-dark .settings-form[data-v-013a967f] .ant-input:focus,.settings-page.theme-dark .settings-form[data-v-013a967f] .ant-input:hover,.settings-page.theme-dark .settings-form[data-v-013a967f] .ant-select-selection:focus,.settings-page.theme-dark .settings-form[data-v-013a967f] .ant-select-selection:hover{border-color:#1890ff}
+.settings-page .settings-header .page-title .anticon[data-v-7808b8bc]{color:#1890ff}
+.settings-page .settings-nav .settings-menu[data-v-7808b8bc] .ant-menu-item:hover{background:rgba(24,144,255,.06);color:#1890ff}
+.settings-page .settings-nav .settings-menu[data-v-7808b8bc] .ant-menu-item:hover .anticon{color:#1890ff}
+.settings-page .settings-nav .settings-menu[data-v-7808b8bc] .ant-menu-item.ant-menu-item-selected{background:linear-gradient(135deg,rgba(24,144,255,.1),rgba(19,194,194,.08));color:#1890ff}
+.settings-page .settings-nav .settings-menu[data-v-7808b8bc] .ant-menu-item.ant-menu-item-selected .anticon{color:#1890ff}
+.settings-page .settings-detail .detail-header .detail-icon[data-v-7808b8bc]{color:#1890ff}
+.settings-page .settings-detail .search-result-group-tag[data-v-7808b8bc]{background:rgba(24,144,255,.08);color:#1890ff}
+.settings-page .commercial-license-notice .contact-link[data-v-7808b8bc]{color:#1890ff}
+.settings-page .commercial-license-notice .contact-link[data-v-7808b8bc]:hover{color:#096dd9}
+.settings-page .openrouter-balance-card .ant-card[data-v-7808b8bc]{background:linear-gradient(135deg,#e6f7ff,#f0f5ff);border:1px solid #91d5ff}
+.settings-page .openrouter-balance-card .balance-header .balance-title[data-v-7808b8bc]{color:#1890ff}
+.settings-page .settings-form[data-v-7808b8bc] .ant-form-item-label .form-label-with-tooltip .help-icon:hover{color:#1890ff}
+.settings-page .settings-form[data-v-7808b8bc] .ant-form-item-label .form-label-with-tooltip .api-link{color:#1890ff;background:rgba(24,144,255,.08)}
+.settings-page .settings-form[data-v-7808b8bc] .ant-form-item-label .form-label-with-tooltip .api-link:hover{background:rgba(24,144,255,.15)}
+.settings-page.theme-dark .commercial-license-notice .contact-link[data-v-7808b8bc]{color:#69c0ff}
+.settings-page.theme-dark .commercial-license-notice .contact-link[data-v-7808b8bc]:hover{color:#91d5ff}
+.settings-page.theme-dark .settings-form[data-v-7808b8bc] .ant-form-item-label .form-label-with-tooltip .api-link{background:rgba(24,144,255,.15)}
+.settings-page.theme-dark .settings-form[data-v-7808b8bc] .ant-form-item-label .form-label-with-tooltip .api-link:hover{background:rgba(24,144,255,.25)}
+.settings-page.theme-dark .settings-form[data-v-7808b8bc] .ant-input-number:focus,.settings-page.theme-dark .settings-form[data-v-7808b8bc] .ant-input-number:hover,.settings-page.theme-dark .settings-form[data-v-7808b8bc] .ant-input-password:focus,.settings-page.theme-dark .settings-form[data-v-7808b8bc] .ant-input-password:hover,.settings-page.theme-dark .settings-form[data-v-7808b8bc] .ant-input:focus,.settings-page.theme-dark .settings-form[data-v-7808b8bc] .ant-input:hover,.settings-page.theme-dark .settings-form[data-v-7808b8bc] .ant-select-selection:focus,.settings-page.theme-dark .settings-form[data-v-7808b8bc] .ant-select-selection:hover{border-color:#1890ff}
 .turnstile-container .turnstile-error a[data-v-20437450]{color:#1890ff}
 .main .login-method-switch a[data-v-de9678f6]:hover{color:#1890ff}
 .main .login-method-switch a.active[data-v-de9678f6]{color:#1890ff;border-bottom-color:#1890ff}
