@@ -106,8 +106,11 @@ ADVANCED_KEYS = {
     'REFLECTION_WORKER_INTERVAL_SEC', 'REFLECTION_MIN_AGE_DAYS', 'REFLECTION_VALIDATE_LIMIT',
     'AI_CALIBRATION_MARKETS', 'AI_CALIBRATION_LOOKBACK_DAYS', 'AI_CALIBRATION_MIN_SAMPLES',
     # USDT pay internals
-    'USDT_PAY_CHAIN', 'USDT_TRC20_CONTRACT', 'TRONGRID_BASE_URL',
+    'USDT_TRC20_CONTRACT', 'USDT_BEP20_CONTRACT', 'USDT_ERC20_CONTRACT', 'USDT_SOL_MINT',
+    'TRONGRID_BASE_URL', 'ETHERSCAN_V2_BASE_URL', 'BSC_RPC_URLS', 'ETH_RPC_URLS',
+    'SOLANA_RPC_URL', 'BEP20_PREFER_EXPLORER', 'ERC20_PREFER_EXPLORER',
     'USDT_PAY_CONFIRM_SECONDS', 'USDT_PAY_EXPIRE_MINUTES',
+    'USDT_AMOUNT_SUFFIX_DECIMALS', 'USDT_WORKER_POLL_INTERVAL',
     # Adanos sentiment
     'ADANOS_SENTIMENT_SOURCE', 'ADANOS_API_BASE_URL',
     # Brand internals
@@ -1216,63 +1219,88 @@ CONFIG_SCHEMA = {
                 'description': 'Credits granted every 30 days for lifetime members'
             },
 
-            # ===== USDT Pay (方案B：每单独立地址) =====
+            # ===== USDT Pay (v3.0.6+: one fixed address per chain + amount-suffix matching) =====
+            # Model: each chain has a single receiving address. Orders are
+            # disambiguated by a unique amount suffix in the low decimals
+            # (e.g. 19.991234 USDT, where .001234 is the order tag), so funds
+            # land directly in the operator wallet without per-order HD
+            # derivation or batched consolidation.
             {
                 'key': 'USDT_PAY_ENABLED',
                 'label': 'Enable USDT Pay',
                 'type': 'boolean',
                 'default': 'False',
-                'description': 'Enable USDT scan-to-pay flow (per-order unique address)'
+                'description': 'Master switch for USDT scan-to-pay checkout (multi-chain, single address + amount-suffix matching).'
             },
             {
-                'key': 'USDT_PAY_CHAIN',
-                'label': 'USDT Chain',
-                'type': 'select',
-                'default': 'TRC20',
-                'options': ['TRC20'],
-                'description': 'Currently only TRC20 is supported'
+                'key': 'USDT_PAY_ENABLED_CHAINS',
+                'label': 'Enabled Chains',
+                'type': 'text',
+                'default': 'TRC20,BEP20,ERC20,SOL',
+                'description': 'Comma-separated chain whitelist. Any code not in this list is rejected at order creation. Valid codes: TRC20 / BEP20 / ERC20 / SOL.'
             },
             {
-                'key': 'USDT_TRC20_XPUB',
-                'label': 'TRC20 XPUB (Watch-only)',
-                'type': 'password',
+                'key': 'USDT_TRC20_ADDRESS',
+                'label': 'TRC20 Receiving Address',
+                'type': 'text',
                 'required': False,
-                'description': 'Watch-only xpub used to derive per-order deposit addresses. Do NOT paste private key.'
+                'description': 'Your TRON wallet address (starts with T...). Leave blank to hide TRC20 from the chain picker.'
             },
             {
-                'key': 'USDT_TRC20_CONTRACT',
-                'label': 'USDT TRC20 Contract',
+                'key': 'USDT_BEP20_ADDRESS',
+                'label': 'BEP20 Receiving Address',
                 'type': 'text',
-                'default': 'TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t',
-                'description': 'USDT contract address on TRON'
+                'required': False,
+                'description': 'Your BSC wallet address (0x...). Reconciliation runs on public BSC RPC by default — no API key needed.'
             },
             {
-                'key': 'TRONGRID_BASE_URL',
-                'label': 'TronGrid Base URL',
+                'key': 'USDT_ERC20_ADDRESS',
+                'label': 'ERC20 Receiving Address',
                 'type': 'text',
-                'default': 'https://api.trongrid.io',
-                'description': 'TronGrid API base URL'
+                'required': False,
+                'description': 'Your Ethereum wallet address (0x...). Reconciliation prefers Etherscan V2 (free plan covers ETH), with public Ethereum RPC fallback.'
+            },
+            {
+                'key': 'USDT_SOL_ADDRESS',
+                'label': 'Solana Receiving Address',
+                'type': 'text',
+                'required': False,
+                'description': 'Your Solana wallet address (base58). The SPL USDT mint ATA is derived on-chain by the sender wallet.'
             },
             {
                 'key': 'TRONGRID_API_KEY',
                 'label': 'TronGrid API Key',
                 'type': 'password',
                 'required': False,
-                'description': 'Optional TronGrid API key for higher rate limits'
+                'description': 'Optional. Higher TronGrid rate-limit / stability for TRC20 reconciliation. Get one at https://www.trongrid.io.'
+            },
+            {
+                'key': 'ETHERSCAN_API_KEY',
+                'label': 'Etherscan API Key',
+                'type': 'password',
+                'required': False,
+                'description': 'Optional. Used for ERC20 reconciliation via Etherscan V2 (free plan covers Ethereum mainnet). BEP20 ignores this — it uses public BSC RPC. Get a key at https://etherscan.io/myapikey.'
             },
             {
                 'key': 'USDT_PAY_CONFIRM_SECONDS',
                 'label': 'Confirm Delay (sec)',
                 'type': 'number',
                 'default': '30',
-                'description': 'Delay before marking a paid transaction as confirmed (TRC20)'
+                'description': 'Seconds to wait after detecting a transfer before marking the order confirmed and activating the membership.'
             },
             {
                 'key': 'USDT_PAY_EXPIRE_MINUTES',
                 'label': 'Order Expire (min)',
                 'type': 'number',
                 'default': '30',
-                'description': 'USDT payment order expiration time in minutes'
+                'description': 'Minutes a pending USDT order stays open before expiring. Users can re-open the modal to generate a fresh amount suffix.'
+            },
+            {
+                'key': 'USDT_WORKER_POLL_INTERVAL',
+                'label': 'Worker Poll Interval (sec)',
+                'type': 'number',
+                'default': '30',
+                'description': 'How often the background worker re-scans pending/paid orders against on-chain data.'
             },
             {
                 'key': 'BILLING_COST_AI_ANALYSIS',
