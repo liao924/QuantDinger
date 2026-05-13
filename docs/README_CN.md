@@ -263,7 +263,7 @@ QuantDinger 是**可自托管**的量化操作系统：**AI 辅助研究**、**P
 
 ## 功能一览
 
-- **研究与 AI** — 多 LLM 分析、自选、分析历史；可选协同/校准；NL→指标/策略；回测后 AI 建议；Polymarket 作**研究**向工作流。**[Agent 网关 + MCP](#mcp-agent-gateway)** 对接 Cursor / Claude Code / Codex 等。
+- **研究与 AI** — 多 LLM 分析、自选、分析历史；可选协同/校准；NL→指标/策略；回测后 AI 建议。**[Agent 网关 + MCP](#mcp-agent-gateway)** 对接 Cursor / Claude Code / Codex 等。
 - **构建** — `IndicatorStrategy`（表格式信号、图表叠加）与 `ScriptStrategy`（`on_bar`、显式下单）；专业 K 线界面。
 - **验证** — 服务端回测、指标、资金曲线、策略快照。
 - **运营** — 加密货币执行、快速交易、IBKR / MT5 / Alpaca（美股、ETF、加密货币），通知接 Telegram、邮件、短信、Discord、Webhook。**统一经纪商账户页**集中管理三家券商的连接、账户 KPI、持仓与挂单撤单。
@@ -500,10 +500,6 @@ df["sell"] = sell.fillna(False).astype(bool)
 
 > **经纪商账户页（`/broker-accounts`，v3.0.5+）** — IBKR、MT5、Alpaca 共用一个统一管理页面：每家券商各一个连接表单 + 账户 KPI + 持仓表 + 挂单表（含一键撤单）。多租户安全：通过 `BrokerSessionRegistry` 隔离每个用户的会话，一个用户重连不会把其他用户踢下线。
 
-### 预测市场
-
-Polymarket 当前定位为**研究与分析工作流**，不是平台内的直接实盘执行模块。它适合做市场检索、分歧分析、机会评分和 AI 辅助研究。
-
 ## 策略开发模式
 
 QuantDinger 当前支持两种主要策略开发模式：
@@ -590,7 +586,7 @@ QuantDinger/
 
 ### QuantDinger 只适合做加密货币吗？
 
-不是。加密货币是核心场景之一，但平台也支持 IBKR / Alpaca 的美股 / ETF 链路（Alpaca 还支持加密货币）、MT5 的外汇链路，以及 Polymarket 的研究型分析工作流。
+不是。加密货币是核心场景之一，但平台也支持 IBKR / Alpaca 的美股 / ETF 链路（Alpaca 还支持加密货币）、MT5 的外汇链路。
 
 ### 我可以直接写 Python 策略吗？
 

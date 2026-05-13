@@ -261,7 +261,7 @@ QuantDinger is a **self-hosted** quantitative OS: **AI-assisted research**, **Py
 
 ## Features at a glance
 
-- **Research & AI** — Multi-LLM analysis, watchlists, analysis history; optional ensemble/calibration; NL→indicator/strategy; post-backtest AI hints; Polymarket as a **research** workflow. **[Agent Gateway + MCP](#use-it-from-an-ai-agent-cursor--claude-code--codex--mcp)** for Cursor / Claude Code / Codex.
+- **Research & AI** — Multi-LLM analysis, watchlists, analysis history; optional ensemble/calibration; NL→indicator/strategy; post-backtest AI hints. **[Agent Gateway + MCP](#use-it-from-an-ai-agent-cursor--claude-code--codex--mcp)** for Cursor / Claude Code / Codex.
 - **Build** — `IndicatorStrategy` (dataframe signals, chart overlays) and `ScriptStrategy` (`on_bar`, explicit orders); professional chart UI.
 - **Validate** — Server-side backtests, metrics, equity curves, strategy snapshots.
 - **Operate** — Crypto execution, quick trade, IBKR / MT5 / Alpaca (US stocks, ETFs, crypto), notifications (Telegram, email, SMS, Discord, webhooks). **Unified Broker Accounts page** centralises connection, account KPIs, positions and open-order management across all brokers.
@@ -509,10 +509,6 @@ See full examples:
 
 > **Broker Accounts page (`/broker-accounts`, v3.0.5+)** — IBKR, MT5 and Alpaca share a single unified management page: per-broker connect form, account KPIs, positions table and open-order management with one-click cancel. Multi-tenant safe: each user's session is isolated via `BrokerSessionRegistry`, so one user reconnecting doesn't kick everyone else off.
 
-### Prediction Markets
-
-Polymarket is currently supported as a **research and analysis workflow**, not as direct in-platform live execution. It is useful for market lookup, divergence analysis, opportunity scoring, and AI-assisted review.
-
 ## Strategy Development Modes
 
 QuantDinger supports two main strategy authoring models:
@@ -600,7 +596,7 @@ Yes. The default deployment model is your own Docker Compose stack with your own
 
 ### Is QuantDinger only for crypto trading?
 
-No. Crypto is a major focus, but the platform also includes IBKR and Alpaca workflows for US stocks / ETFs (Alpaca additionally covers crypto), MT5 workflows for forex, and Polymarket research support.
+No. Crypto is a major focus, but the platform also includes IBKR and Alpaca workflows for US stocks / ETFs (Alpaca additionally covers crypto) and MT5 workflows for forex.
 
 ### Can I write strategies directly in Python?
 

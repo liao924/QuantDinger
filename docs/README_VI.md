@@ -147,7 +147,7 @@ Môi trường thống nhất **AI + chiến lược Python + kiểm thử lùi 
 
 ## Điểm nổi bật
 
-- **Nghiên cứu &amp; AI** — Phân tích đa LLM, danh mục theo dõi, lịch sử; NL→mã; quy trình Polymarket; tích hợp **Agent / MCP**.
+- **Nghiên cứu &amp; AI** — Phân tích đa LLM, danh mục theo dõi, lịch sử; NL→mã; tích hợp **Agent / MCP**.
 - **Xây dựng** — `IndicatorStrategy` và `ScriptStrategy` (`on_bar`); giao diện nến chuyên nghiệp.
 - **Xác minh** — Kiểm thử lùi phía máy chủ, đường vốn.
 - **Vận hành** — Thực thi tiền mã hóa, giao dịch nhanh, IBKR / MT5 / Alpaca (cổ Mỹ · ETF · tiền mã hóa); Telegram, email, Discord, Webhook, v.v.
@@ -221,7 +221,7 @@ Khác: [multi-user-setup.md](multi-user-setup.md) · [IBKR](IBKR_TRADING_GUIDE_E
 
 **Có thật sự tự host được không?** Có, triển khai bằng Docker Compose trên hạ tầng của bạn.
 
-**Chỉ tiền mã hóa?** Không. Hỗ trợ IBKR / Alpaca (cổ Mỹ · ETF · tiền mã hóa), MT5 (FX), và Polymarket cho nghiên cứu.
+**Chỉ tiền mã hóa?** Không. Hỗ trợ IBKR / Alpaca (cổ Mỹ · ETF · tiền mã hóa) và MT5 (FX).
 
 **Viết chiến lược bằng Python được không?** Có, hỗ trợ `IndicatorStrategy` và `ScriptStrategy`.
 

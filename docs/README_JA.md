@@ -147,7 +147,7 @@ Git for Windows の Bash なら、上記 macOS/Linux の 1 行コマンドが使
 
 ## 機能ハイライト
 
-- **リサーチ & AI** — マルチ LLM 分析、ウォッチリスト、履歴；NL→コード；Polymarket 研究フロー；**Agent / MCP** 連携。
+- **リサーチ & AI** — マルチ LLM 分析、ウォッチリスト、履歴；NL→コード；**Agent / MCP** 連携。
 - **構築** — `IndicatorStrategy` と `ScriptStrategy`（`on_bar`）；プロ向け K 線 UI。
 - **検証** — サーバサイドバックテスト、エクイティカーブ。
 - **運用** — 暗号執行、クイックトレード、IBKR / MT5 / Alpaca（米株・ETF・暗号資産）；Telegram、メール、Discord、Webhook 等。
@@ -221,7 +221,7 @@ AI 機能には `env.example` の **AI / LLM** 節を `.env` に反映し、back
 
 **本当にセルフホストできる？** はい。Docker Compose で自分のインフラ上に展開します。
 
-**暗号だけ？** いいえ。IBKR・Alpaca（米株・ETF・暗号資産）、MT5（FX）、Polymarket 研究にも対応。
+**暗号だけ？** いいえ。IBKR・Alpaca（米株・ETF・暗号資産）、MT5（FX）にも対応。
 
 **Python で戦略を書ける？** はい。`IndicatorStrategy` と `ScriptStrategy` をサポート。
 

@@ -147,7 +147,7 @@ Git for Windows Bash에서는 위 macOS/Linux 한 줄 명령을 그대로 사용
 
 ## 기능 하이라이트
 
-- **리서치 & AI** — 멀티 LLM 분석, 관심목록, 기록; NL→코드; Polymarket 리서치 플로; **Agent / MCP** 연동.
+- **리서치 & AI** — 멀티 LLM 분석, 관심목록, 기록; NL→코드; **Agent / MCP** 연동.
 - **구축** — `IndicatorStrategy`와 `ScriptStrategy`(`on_bar`); 프로 K라인 UI.
 - **검증** — 서버 사이드 백테스트, 에퀴티 커브.
 - **운영** — 암호화폐 실행, 퀵 트레이드, IBKR / MT5 / Alpaca(미국 주식 · ETF · 암호화폐); Telegram, 이메일, Discord, Webhook 등.
@@ -221,7 +221,7 @@ AI 기능은 `env.example`의 **AI / LLM** 섹션을 `.env`에 반영한 뒤 bac
 
 **정말 셀프호스트 가능한가요?** 네. Docker Compose로 자체 인프라에 배포합니다.
 
-**암호화폐만인가요?** 아니요. IBKR / Alpaca(미국 주식 · ETF · 암호화폐), MT5(FX), Polymarket 리서치도 지원합니다.
+**암호화폐만인가요?** 아니요. IBKR / Alpaca(미국 주식 · ETF · 암호화폐), MT5(FX)도 지원합니다.
 
 **Python으로 전략을 쓸 수 있나요?** 네. `IndicatorStrategy`와 `ScriptStrategy`를 지원합니다.
 

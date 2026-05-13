@@ -147,7 +147,7 @@ docker-compose up -d --build
 
 ## ไฮไลต์คุณสมบัติ
 
-- **วิจัย & AI** — วิเคราะห์หลาย LLM รายการโปรด ประวัติ NL→โค้ด เวิร์กโฟลว์ Polymarket การเชื่อม **Agent / MCP**
+- **วิจัย & AI** — วิเคราะห์หลาย LLM รายการโปรด ประวัติ NL→โค้ด การเชื่อม **Agent / MCP**
 - **สร้าง** — `IndicatorStrategy` และ `ScriptStrategy` (`on_bar`) UI แท่งเทียนระดับโปร
 - **ตรวจสอบ** — ทดสอบย้อนหลังฝั่งเซิร์ฟเวอร์ เส้น equity
 - **ปฏิบัติการ** — ดำเนินการคริปโต เทรดเร็ว IBKR / MT5 / Alpaca (หุ้นสหรัฐ · ETF · คริปโต) Telegram อีเมล Discord Webhook ฯลฯ
@@ -221,7 +221,7 @@ flowchart LR
 
 **โฮสต์เองได้จริงหรือ?** ได้ ใช้ Docker Compose บนโครงสร้างของคุณ
 
-**มีแค่คริปโตหรือ?** ไม่ใช่ รองรับ IBKR / Alpaca (หุ้นสหรัฐ · ETF · คริปโต) MT5 (FX) และ Polymarket สำหรับงานวิจัย
+**มีแค่คริปโตหรือ?** ไม่ใช่ รองรับ IBKR / Alpaca (หุ้นสหรัฐ · ETF · คริปโต) และ MT5 (FX)
 
 **เขียนกลยุทธ์ด้วย Python ได้ไหม?** ได้ รองรับ `IndicatorStrategy` และ `ScriptStrategy`
 
