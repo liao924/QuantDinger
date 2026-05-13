@@ -365,12 +365,17 @@ def _scan_rpc(
 ) -> WatcherResult:
     """Search USDT Transfer logs on a public RPC.
 
-    Strategy: compute the block range that covers ``created_at`` (with a
-    60-second slop), then ``eth_getLogs`` against the USDT contract
-    filtered by Transfer topic + the receiving address as ``topic2``.
-    Public RPCs typically allow several-thousand-block windows for this
-    kind of indexed log query, so a 30-min order window is well within
-    free-tier limits.
+    Strategy:
+      1. Compute the desired block range covering ``created_at`` (with a
+         60-second slop). For orders that have been alive for a long time
+         this can be tens of thousands of blocks on BSC.
+      2. Because most public RPCs cap a single ``eth_getLogs`` window at
+         5k blocks (BSC nodes return ``code=-32005 "limit exceeded"``
+         beyond that), the worker splits the desired range into chunks of
+         ``_MAX_BLOCK_LOOKBACK`` and queries newest → oldest. A match in
+         any chunk returns immediately, so freshly-paid orders still
+         resolve in a single RPC call while old-revived orders walk
+         further back without losing reach.
     """
     spec = CHAIN_SPECS[chain]
     contract = _resolve_contract(chain)
@@ -389,65 +394,102 @@ def _scan_rpc(
     except (TypeError, ValueError):
         return None, f"{chain.lower()}_rpc_bad_block_number={blk_hex!r}"
 
-    # 2) fromBlock from created_at (+60s slop), capped to a sane window
+    # 2) full desired lookback from created_at, NOT clamped here — the
+    #    chunking loop below enforces the per-request cap.
     block_time = _AVG_BLOCK_TIME_SEC.get(chain, 3.0)
-    max_lookback = _MAX_BLOCK_LOOKBACK.get(chain, 1500)
+    chunk_size = _MAX_BLOCK_LOOKBACK.get(chain, 1500)
     ct = _parse_created_at(created_at)
     if ct is not None:
         secs = max(0.0, (datetime.now(timezone.utc) - ct).total_seconds() + 60)
-        lookback = int(secs / block_time) + 20
+        total_lookback = int(secs / block_time) + 20
     else:
-        lookback = max_lookback
-    lookback = min(lookback, max_lookback)
-    from_block = max(0, latest_block - lookback)
+        total_lookback = chunk_size
+    # Absolute safety ceiling: never walk back further than ~4h of BSC
+    # real time, even if the caller passes a very old created_at. This
+    # keeps a single reconcile call bounded to ~4 chunks worst-case.
+    absolute_max = chunk_size * 4
+    total_lookback = max(chunk_size, min(total_lookback, absolute_max))
+    floor_block = max(0, latest_block - total_lookback)
 
-    # 3) eth_getLogs: USDT.Transfer(*, address)
     topic_to = _address_to_topic(address)
-    log_filter = {
-        "fromBlock": hex(from_block),
-        "toBlock": "latest",
-        "address": contract.lower(),
-        # [event_sig, from(any), to(us)]
-        "topics": [_TRANSFER_TOPIC, None, topic_to],
-    }
-    logs, used_url, err = _try_rpcs(urls, "eth_getLogs", [log_filter])
-    if logs is None:
-        return None, f"{chain.lower()}_rpc_get_logs_failed:{err}"
-    if not isinstance(logs, list):
-        return None, f"{chain.lower()}_rpc_bad_logs={str(logs)[:120]!r}"
 
     scanned = 0
     wrong_amount = parse_err = 0
-    for log in logs:
-        scanned += 1
-        try:
-            data = log.get("data") or "0x0"
-            val = int(data, 16)
-            if val < target - 1 or val > target + 1:
-                wrong_amount += 1
-                continue
-            topics = log.get("topics") or []
-            from_topic = topics[1] if len(topics) >= 2 else ""
-            from_addr = "0x" + str(from_topic)[-40:] if from_topic else ""
-            transfer = IncomingTransfer(
-                tx_hash=str(log.get("transactionHash") or ""),
-                # eth_getLogs doesn't include the block timestamp; leave it
-                # at 0. The service's "paid → confirmed" flow falls back to
-                # `paid_at` for the confirm-delay gate, so this is fine.
-                block_timestamp_ms=0,
-                from_addr=from_addr,
-                to_addr=address,
-                value_smallest_unit=val,
-                raw=log,
-            )
-            return transfer, f"rpc_ok scanned={scanned} via={used_url} from_block={from_block}"
-        except (TypeError, ValueError):
-            parse_err += 1
+    used_url: Optional[str] = None
+    walked_from: Optional[int] = None
+    last_err: Optional[str] = None
+
+    # Walk newest → oldest in fixed-size chunks. Newest first means a
+    # user who just paid resolves on the first chunk (~1 RPC call), while
+    # an order created hours ago still gets the full reach.
+    end = latest_block
+    while end >= floor_block:
+        start = max(floor_block, end - (chunk_size - 1))
+        log_filter = {
+            "fromBlock": hex(start),
+            "toBlock": hex(end),
+            "address": contract.lower(),
+            "topics": [_TRANSFER_TOPIC, None, topic_to],
+        }
+        logs, url, err = _try_rpcs(urls, "eth_getLogs", [log_filter])
+        if logs is None:
+            last_err = f"{err} (range={start}-{end})"
+            # Don't abort the whole scan on a single chunk failure —
+            # next chunk may use a different RPC via fallback. But if
+            # every RPC died on this chunk we'll bubble up `last_err`
+            # at the end so operators see why.
+            end = start - 1
+            continue
+        used_url = url
+        if walked_from is None or start < walked_from:
+            walked_from = start
+
+        if not isinstance(logs, list):
+            last_err = f"bad_logs={str(logs)[:120]!r} (range={start}-{end})"
+            end = start - 1
+            continue
+
+        for log in logs:
+            scanned += 1
+            try:
+                data = log.get("data") or "0x0"
+                val = int(data, 16)
+                if val < target - 1 or val > target + 1:
+                    wrong_amount += 1
+                    continue
+                topics = log.get("topics") or []
+                from_topic = topics[1] if len(topics) >= 2 else ""
+                from_addr = "0x" + str(from_topic)[-40:] if from_topic else ""
+                transfer = IncomingTransfer(
+                    tx_hash=str(log.get("transactionHash") or ""),
+                    # eth_getLogs doesn't include the block timestamp;
+                    # leave it at 0. The service's "paid → confirmed"
+                    # flow falls back to `paid_at` for the confirm-delay
+                    # gate, so this is fine.
+                    block_timestamp_ms=0,
+                    from_addr=from_addr,
+                    to_addr=address,
+                    value_smallest_unit=val,
+                    raw=log,
+                )
+                return transfer, (
+                    f"rpc_ok scanned={scanned} via={used_url} "
+                    f"matched_block={int(log.get('blockNumber','0x0'), 16)} "
+                    f"walked_from={walked_from}"
+                )
+            except (TypeError, ValueError):
+                parse_err += 1
+
+        end = start - 1
+
+    if scanned == 0 and last_err is not None:
+        return None, f"{chain.lower()}_rpc_get_logs_failed:{last_err}"
 
     return None, (
         f"rpc_no_match scanned={scanned} target_raw={target} "
         f"wrong_amount={wrong_amount} parse_err={parse_err} "
-        f"from_block={from_block} latest={latest_block} via={used_url}"
+        f"walked_from={walked_from if walked_from is not None else floor_block} "
+        f"latest={latest_block} via={used_url}"
     )
 
 
