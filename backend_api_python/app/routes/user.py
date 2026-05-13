@@ -1862,3 +1862,26 @@ def get_admin_ai_stats():
         import traceback
         logger.error(traceback.format_exc())
         return jsonify({'code': 0, 'msg': str(e), 'data': None}), 500
+
+
+# ==================== Admin User Dashboard Stats ====================
+
+@user_bp.route('/admin/stats', methods=['GET'])
+@login_required
+@admin_required
+def get_admin_user_stats():
+    """KPI dashboard data for the User Management tab (admin only).
+
+    Returns a single envelope with `summary`, `growth`, `activity`.
+    See `app.services.user_stats_service` for the schema of each section.
+    """
+    try:
+        from app.services.user_stats_service import get_user_admin_stats
+
+        data = get_user_admin_stats()
+        return jsonify({'code': 1, 'msg': 'success', 'data': data})
+    except Exception as e:
+        logger.error(f"get_admin_user_stats failed: {e}")
+        import traceback
+        logger.error(traceback.format_exc())
+        return jsonify({'code': 0, 'msg': str(e), 'data': None}), 500

@@ -528,7 +528,11 @@ class StrategyService:
                                 f"(3) you're using the correct key set for base_url={base_url or 'unknown'}."
                             )
                             if is_demo:
-                                hint += " Demo mode is enabled, so you must use Binance demo/testnet API keys instead of mainnet keys."
+                                hint += (
+                                    " Demo mode is enabled. You must use a Binance Testnet API key issued on "
+                                    "testnet.binance.vision (Spot) or testnet.binancefuture.com (Futures); "
+                                    "mainnet keys do NOT work on the testnet."
+                                )
                             else:
                                 hint += " Mainnet mode is enabled, so you must use binance.com mainnet keys."
                             if alt_ok:
@@ -542,7 +546,8 @@ class StrategyService:
                                 "币安接口返回 -2015（密钥/IP/权限不匹配）。请逐项核对："
                                 "① API Key 是否勾选与当前测试一致的业务（现货选现货权限，合约选合约/U 本位权限）；"
                                 "② 若启用 IP 白名单，是否包含当前服务器出口 IP（见下方 egress_ip）；"
-                                "③ base_url 与密钥环境一致（主网密钥配 api.binance.com / fapi，模拟盘配 demo 域名与 demo Key）；"
+                                "③ base_url 与密钥环境一致（主网密钥配 api.binance.com / fapi.binance.com，"
+                                "模拟盘需在 testnet.binance.vision / testnet.binancefuture.com 单独申请的 Testnet Key，主网 Key 在测试网无效）；"
                                 "④ 无多余空格、复制完整 Secret。"
                             )
                             if alt_ok:

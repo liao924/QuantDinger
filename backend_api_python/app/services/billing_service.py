@@ -33,14 +33,12 @@ DEFAULT_BILLING_CONFIG = {
     # ai_analysis 统一单价：即时分析 / AI过滤 / 定时任务 均按此单价 × 标的数扣费
     'cost_ai_analysis': 10,
     'cost_ai_code_gen': 30,
-    'cost_polymarket_deep_analysis': 15,
 }
 
 # Feature name mapping (for log recording)
 FEATURE_NAMES = {
     'ai_analysis': 'AI Analysis',
     'ai_code_gen': 'AI Code Generation',
-    'polymarket_deep_analysis': 'Polymarket Deep Analysis',
 }
 
 
@@ -464,7 +462,7 @@ class BillingService:
         
         Args:
             user_id: 用户ID
-            feature: 功能名称（ai_analysis / polymarket_deep_analysis）
+            feature: 功能名称（ai_analysis / ai_code_gen）
             reference_id: 关联ID（可选）
         
         Returns:
@@ -740,7 +738,6 @@ class BillingService:
             'feature_costs': {
                 'ai_analysis': config.get('cost_ai_analysis', 0),
                 'ai_code_gen': config.get('cost_ai_code_gen', 0),
-                'polymarket_deep_analysis': config.get('cost_polymarket_deep_analysis', 0),
             }
         }
 

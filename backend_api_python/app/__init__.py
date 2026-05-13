@@ -94,15 +94,6 @@ def get_pending_order_worker():
     return _pending_order_worker
 
 
-def start_polymarket_worker():
-    """启动Polymarket后台任务"""
-    try:
-        from app.services.polymarket_worker import get_polymarket_worker
-        get_polymarket_worker().start()
-    except Exception as e:
-        logger.error(f"Failed to start Polymarket worker: {e}")
-
-
 def start_portfolio_monitor():
     """Start the portfolio monitor service if enabled.
     
@@ -292,7 +283,6 @@ def create_app(config_name='default'):
         start_pending_order_worker()
         start_portfolio_monitor()
         start_usdt_order_worker()
-        start_polymarket_worker()
         # Offline calibration to make AI thresholds self-tuning.
         try:
             from app.services.ai_calibration import start_ai_calibration_worker

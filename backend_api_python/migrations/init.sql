@@ -73,18 +73,30 @@ CREATE TABLE IF NOT EXISTS qd_membership_orders (
 CREATE INDEX IF NOT EXISTS idx_membership_orders_user_id ON qd_membership_orders(user_id);
 
 -- =============================================================================
--- 1.56. USDT Orders (USDT 收款订单 - 每单独立地址)
+-- 1.56. USDT Orders (multi-chain single-receiving-address + amount-suffix model)
 -- =============================================================================
+--
+-- v3.0.6 reset: replaced xpub-derived per-order addresses with a single fixed
+-- receiving address per chain. Orders are identified on-chain by a unique
+-- amount suffix in the low decimals (e.g. 19.991234 -> suffix 0.001234).
+-- This eliminates the consolidation step (funds land directly in the main
+-- wallet) and removes per-sweep TRX/gas costs.
+--
+-- Supported chains: TRC20 (TRON), BEP20 (BSC), ERC20 (Ethereum), SOL (Solana SPL).
+-- Each chain's address is configured via USDT_{CHAIN}_ADDRESS env var.
 
 CREATE TABLE IF NOT EXISTS qd_usdt_orders (
     id SERIAL PRIMARY KEY,
     user_id INTEGER NOT NULL REFERENCES qd_users(id) ON DELETE CASCADE,
-    plan VARCHAR(20) NOT NULL,                 -- monthly/yearly/lifetime
-    chain VARCHAR(20) NOT NULL DEFAULT 'TRC20',-- TRC20 (MVP)
-    amount_usdt DECIMAL(20,6) NOT NULL DEFAULT 0,
-    address_index INTEGER NOT NULL DEFAULT 0,  -- HD 派生索引
-    address VARCHAR(80) NOT NULL DEFAULT '',
-    status VARCHAR(20) NOT NULL DEFAULT 'pending', -- pending/paid/confirmed/expired/cancelled/failed
+    plan VARCHAR(20) NOT NULL,                                  -- monthly/yearly/lifetime
+    chain VARCHAR(20) NOT NULL DEFAULT 'TRC20',                 -- TRC20/BEP20/ERC20/SOL
+    currency VARCHAR(10) NOT NULL DEFAULT 'USDT',
+    amount_usdt DECIMAL(20,8) NOT NULL DEFAULT 0,               -- final amount = base + suffix (6 dp typical)
+    amount_suffix DECIMAL(20,8) NOT NULL DEFAULT 0,             -- the unique suffix portion used for matching
+    address VARCHAR(120) NOT NULL DEFAULT '',                   -- fixed receiving address (per chain)
+    payment_uri TEXT NOT NULL DEFAULT '',                       -- full deep link (EIP-681 / Solana Pay / tron URI)
+    matched_via VARCHAR(20) NOT NULL DEFAULT 'amount_suffix',
+    status VARCHAR(20) NOT NULL DEFAULT 'pending',              -- pending/paid/confirmed/expired/cancelled/failed
     tx_hash VARCHAR(120) DEFAULT '',
     paid_at TIMESTAMP,
     confirmed_at TIMESTAMP,
@@ -93,9 +105,67 @@ CREATE TABLE IF NOT EXISTS qd_usdt_orders (
     updated_at TIMESTAMP DEFAULT NOW()
 );
 
-CREATE UNIQUE INDEX IF NOT EXISTS idx_usdt_orders_address_unique ON qd_usdt_orders(chain, address);
 CREATE INDEX IF NOT EXISTS idx_usdt_orders_user_id ON qd_usdt_orders(user_id);
 CREATE INDEX IF NOT EXISTS idx_usdt_orders_status ON qd_usdt_orders(status);
+-- v3.0.6 cleanup: drop the legacy unique index on (chain, address) that
+-- was used by the per-order xpub-derived address scheme. In the current
+-- "single fixed receiving address per chain + amount-suffix matching"
+-- model, every active order on the same chain shares the same address,
+-- so this old index would falsely reject every second pending order
+-- (UniqueViolation on idx_usdt_orders_address_unique). Safe & idempotent.
+DROP INDEX IF EXISTS idx_usdt_orders_address_unique;
+-- Prevent two active orders on the same chain from claiming the same amount,
+-- which is the foundation of the amount-suffix matching scheme.
+CREATE UNIQUE INDEX IF NOT EXISTS idx_usdt_orders_amount_active
+  ON qd_usdt_orders(chain, amount_usdt)
+  WHERE status IN ('pending', 'paid');
+
+-- One-shot cleanup for installs that pre-date v3.0.6. address_index is no
+-- longer used; we keep the column where it already exists to avoid breaking
+-- old rows, but new installs do not need it. The DO block is idempotent and
+-- safe to re-run.
+DO $$
+BEGIN
+    -- amount_suffix
+    IF NOT EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_name='qd_usdt_orders' AND column_name='amount_suffix'
+    ) THEN
+        ALTER TABLE qd_usdt_orders ADD COLUMN amount_suffix DECIMAL(20,8) NOT NULL DEFAULT 0;
+    END IF;
+    -- payment_uri
+    IF NOT EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_name='qd_usdt_orders' AND column_name='payment_uri'
+    ) THEN
+        ALTER TABLE qd_usdt_orders ADD COLUMN payment_uri TEXT NOT NULL DEFAULT '';
+    END IF;
+    -- currency
+    IF NOT EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_name='qd_usdt_orders' AND column_name='currency'
+    ) THEN
+        ALTER TABLE qd_usdt_orders ADD COLUMN currency VARCHAR(10) NOT NULL DEFAULT 'USDT';
+    END IF;
+    -- matched_via
+    IF NOT EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_name='qd_usdt_orders' AND column_name='matched_via'
+    ) THEN
+        ALTER TABLE qd_usdt_orders ADD COLUMN matched_via VARCHAR(20) NOT NULL DEFAULT 'amount_suffix';
+    END IF;
+    -- widen amount_usdt to (20,8) so suffix at 6+ decimals fits exactly
+    BEGIN
+        ALTER TABLE qd_usdt_orders ALTER COLUMN amount_usdt TYPE DECIMAL(20,8);
+    EXCEPTION WHEN others THEN NULL;
+    END;
+    -- widen address (TRC20 base58 ~34, Solana ~44; old col was 80)
+    BEGIN
+        ALTER TABLE qd_usdt_orders ALTER COLUMN address TYPE VARCHAR(120);
+    EXCEPTION WHEN others THEN NULL;
+    END;
+END
+$$;
 
 -- =============================================================================
 -- 1.59. OAuth CSRF State (多 worker / 多实例共享，避免 Invalid state)
@@ -955,66 +1025,13 @@ CREATE INDEX IF NOT EXISTS idx_quick_trades_user    ON qd_quick_trades(user_id);
 CREATE INDEX IF NOT EXISTS idx_quick_trades_created ON qd_quick_trades(created_at DESC);
 
 -- =============================================================================
--- Polymarket Prediction Markets (预测市场数据和分析)
+-- Polymarket (已移除 / removed in v3.0.7)
 -- =============================================================================
-
--- 预测市场表（缓存）
-CREATE TABLE IF NOT EXISTS qd_polymarket_markets (
-    id SERIAL PRIMARY KEY,
-    market_id VARCHAR(255) UNIQUE NOT NULL,
-    question TEXT,
-    category VARCHAR(100),  -- crypto, politics, economics, sports
-    current_probability DECIMAL(5,2),  -- YES概率（0-100）
-    volume_24h DECIMAL(20,2),
-    liquidity DECIMAL(20,2),
-    end_date_iso TIMESTAMP,
-    status VARCHAR(50),  -- active, closed, resolved
-    outcome_tokens JSONB,  -- YES/NO价格和交易量
-    slug VARCHAR(255),  -- Polymarket事件slug，用于构建URL
-    created_at TIMESTAMP DEFAULT NOW(),
-    updated_at TIMESTAMP DEFAULT NOW()
-);
-
-CREATE INDEX IF NOT EXISTS idx_polymarket_category ON qd_polymarket_markets(category);
-CREATE INDEX IF NOT EXISTS idx_polymarket_status ON qd_polymarket_markets(status);
-CREATE INDEX IF NOT EXISTS idx_polymarket_updated ON qd_polymarket_markets(updated_at DESC);
-
--- AI分析记录表
-CREATE TABLE IF NOT EXISTS qd_polymarket_ai_analysis (
-    id SERIAL PRIMARY KEY,
-    market_id VARCHAR(255) NOT NULL,
-    user_id INTEGER,  -- 可选：用户特定的分析
-    ai_predicted_probability DECIMAL(5,2),
-    market_probability DECIMAL(5,2),
-    divergence DECIMAL(5,2),  -- AI - 市场
-    recommendation VARCHAR(20),  -- YES/NO/HOLD
-    confidence_score DECIMAL(5,2),
-    opportunity_score DECIMAL(5,2),
-    reasoning TEXT,
-    key_factors JSONB,
-    related_assets TEXT[],  -- 相关资产列表
-    created_at TIMESTAMP DEFAULT NOW()
-);
-
-CREATE INDEX IF NOT EXISTS idx_polymarket_analysis_market ON qd_polymarket_ai_analysis(market_id);
-CREATE INDEX IF NOT EXISTS idx_polymarket_analysis_opportunity ON qd_polymarket_ai_analysis(opportunity_score DESC);
-CREATE INDEX IF NOT EXISTS idx_polymarket_analysis_user ON qd_polymarket_ai_analysis(user_id);
-
--- 资产交易机会表（基于预测市场生成）
-CREATE TABLE IF NOT EXISTS qd_polymarket_asset_opportunities (
-    id SERIAL PRIMARY KEY,
-    market_id VARCHAR(255) NOT NULL,
-    asset_symbol VARCHAR(100),
-    asset_market VARCHAR(50),
-    signal VARCHAR(20),  -- BUY/SELL/HOLD
-    confidence DECIMAL(5,2),
-    reasoning TEXT,
-    entry_suggestion JSONB,  -- 入场建议
-    created_at TIMESTAMP DEFAULT NOW()
-);
-
-CREATE INDEX IF NOT EXISTS idx_polymarket_opp_market ON qd_polymarket_asset_opportunities(market_id);
-CREATE INDEX IF NOT EXISTS idx_polymarket_opp_asset ON qd_polymarket_asset_opportunities(asset_symbol, asset_market);
+-- 预测市场相关功能已下线，相关后台 LLM worker、API、数据源全部删除。
+-- 老库一次性清理对应 3 张表与索引；若是全新部署，下面 DROP 是 no-op。
+DROP TABLE IF EXISTS qd_polymarket_asset_opportunities CASCADE;
+DROP TABLE IF EXISTS qd_polymarket_ai_analysis CASCADE;
+DROP TABLE IF EXISTS qd_polymarket_markets CASCADE;
 
 -- =============================================================================
 -- 30. Agent Gateway (/api/agent/v1) — tokens, async jobs, audit, idempotency

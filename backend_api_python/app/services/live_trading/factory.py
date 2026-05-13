@@ -141,11 +141,13 @@ def create_client(exchange_config: Dict[str, Any], *, market_type: str = "swap")
         spot_broker_id = _get(exchange_config, "spot_broker_id", "spotBrokerId", "broker_id", "brokerId") or "A2NAPZAC"
         futures_broker_id = _get(exchange_config, "futures_broker_id", "futuresBrokerId", "broker_id", "brokerId") or "HBpUbQjT"
         if mt == "spot":
-            default_url = "https://demo-api.binance.com" if is_demo else "https://api.binance.com"
+            # Binance Spot Testnet: https://testnet.binance.vision (official)
+            default_url = "https://testnet.binance.vision" if is_demo else "https://api.binance.com"
             base_url = _get(exchange_config, "base_url", "baseUrl") or default_url
             return BinanceSpotClient(api_key=api_key, secret_key=secret_key, base_url=base_url, enable_demo_trading=is_demo, broker_id=spot_broker_id)
         # Default to USDT-M futures
-        default_url = "https://demo-fapi.binance.com" if is_demo else "https://fapi.binance.com"
+        # Binance Futures Testnet: https://testnet.binancefuture.com (official)
+        default_url = "https://testnet.binancefuture.com" if is_demo else "https://fapi.binance.com"
         base_url = _get(exchange_config, "base_url", "baseUrl") or default_url
         return BinanceFuturesClient(api_key=api_key, secret_key=secret_key, base_url=base_url, enable_demo_trading=is_demo, broker_id=futures_broker_id)
     if exchange_id == "okx":
