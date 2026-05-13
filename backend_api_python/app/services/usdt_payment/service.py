@@ -638,14 +638,28 @@ class UsdtOrderWorker:
     def _run(self) -> None:
         # Defer the first scan a few seconds so app init can finish first.
         self._stop_event.wait(timeout=10)
+        # Heartbeat: even when no orders change state, log a single tick
+        # summary every N ticks so operators can confirm the thread is alive
+        # without grep'ing for the rarer state-transition logs.
+        heartbeat_every_ticks = max(1, int(300 / max(1.0, self.poll_interval_sec)))
+        tick = 0
         while not self._stop_event.is_set():
+            tick += 1
             try:
                 svc = get_usdt_payment_service()
                 cfg = svc._get_cfg()
                 if cfg["enabled"]:
                     updated = svc.refresh_all_active_orders()
                     if updated > 0:
-                        logger.info("UsdtOrderWorker: refreshed %s orders", updated)
+                        logger.info("UsdtOrderWorker tick #%s: %s orders changed state", tick, updated)
+                    elif tick == 1 or tick % heartbeat_every_ticks == 0:
+                        # First tick proves the worker reached refresh; later
+                        # heartbeats every ~5 min keep the "alive" signal
+                        # visible in operator logs without spamming.
+                        logger.info(
+                            "UsdtOrderWorker tick #%s heartbeat: 0 orders changed (still scanning)",
+                            tick,
+                        )
                 elif not self._pay_disabled_logged:
                     logger.info(
                         "UsdtOrderWorker: USDT_PAY_ENABLED=false — worker idle until "

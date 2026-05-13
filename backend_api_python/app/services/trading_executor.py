@@ -3526,7 +3526,7 @@ class TradingExecutor:
                     """
                     SELECT COALESCE(SUM(COALESCE(profit, 0) - COALESCE(commission, 0)), 0) AS daily_pnl
                     FROM qd_strategy_trades
-                    WHERE strategy_id = %s AND DATE(created_at) = CURDATE()
+                    WHERE strategy_id = %s AND created_at::date = CURRENT_DATE
                     """,
                     (strategy_id,),
                 )

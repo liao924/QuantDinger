@@ -85,10 +85,20 @@ _DEFAULT_RPCS: Dict[str, List[str]] = {
 }
 # Approximate block time (seconds). Used to convert "scan back N seconds"
 # into "scan back M blocks" without an extra RPC roundtrip.
-_AVG_BLOCK_TIME_SEC: Dict[str, float] = {"BEP20": 3.0, "ERC20": 12.0}
-# Cap the scan window to one explorer-friendly RPC call. Most providers
-# allow at least 5k-block ranges; we stay well under that for safety.
-_MAX_BLOCK_LOOKBACK: Dict[str, int] = {"BEP20": 1500, "ERC20": 600}
+#
+# BSC: post-Maxwell hardfork (April 2025) blocks are produced every ~0.75s,
+# down from the old 3s cadence. Using the old 3.0 constant here silently
+# made the worker scan only 1/4 of the intended time window — a fresh order
+# whose payment landed 20 min ago would be missed because the lookback only
+# covered the last 5 min of real time. 0.75 keeps a small safety margin
+# (slightly over-scans) without exceeding RPC range limits.
+# ETH: still ~12s per block since the Merge.
+_AVG_BLOCK_TIME_SEC: Dict[str, float] = {"BEP20": 0.75, "ERC20": 12.0}
+# Cap the scan window. Public RPCs typically allow 5k-block ranges for
+# eth_getLogs; we cap at 4800 to stay safely under that. At 0.75s/block
+# this covers ~1 hour of BSC real time, which comfortably fits the default
+# 30-min order lifetime plus a bit of slack for manual revivals via SQL.
+_MAX_BLOCK_LOOKBACK: Dict[str, int] = {"BEP20": 4800, "ERC20": 600}
 
 
 # Per-chain reconciliation preference.
