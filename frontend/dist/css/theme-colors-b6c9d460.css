@@ -373,17 +373,17 @@ body.dark .ant-modal-wrap .ant-alert{background:rgba(24,144,255,.06);border-colo
 .theme-dark .position-checkbox-item[data-v-398d904c]:hover{background:rgba(24,144,255,.1)}
 .theme-dark .alert-symbol-info .current-price-info[data-v-398d904c]{background:linear-gradient(135deg,rgba(24,144,255,.15),rgba(114,46,209,.1))}
 .theme-dark .alert-symbol-info .current-price-info .price[data-v-398d904c]{color:#40a9ff}
-.exchange-tab-title .anticon[data-v-5d9f005a]{color:#1890ff}
-.profile-page .page-header .page-title .anticon[data-v-5d9f005a]{color:#1890ff}
-.profile-page .profile-card .profile-info .info-item .anticon[data-v-5d9f005a]{color:#1890ff}
-.profile-page.theme-dark .edit-card[data-v-5d9f005a] .ant-tabs-tab-active{color:#1890ff}
-.profile-page.theme-dark .edit-card[data-v-5d9f005a] .ant-input-password:focus,.profile-page.theme-dark .edit-card[data-v-5d9f005a] .ant-input-password:hover,.profile-page.theme-dark .edit-card[data-v-5d9f005a] .ant-input:focus,.profile-page.theme-dark .edit-card[data-v-5d9f005a] .ant-input:hover{border-color:#1890ff}
-.profile-page.theme-dark[data-v-5d9f005a] .ant-table-wrapper .ant-tag-blue{background:rgba(24,144,255,.25);border-color:#1890ff;color:#69c0ff}
-.profile-page.theme-dark .notification-settings-form[data-v-5d9f005a] .ant-checkbox-checked .ant-checkbox-inner,.profile-page.theme-dark .notification-settings-form[data-v-5d9f005a] .ant-radio-checked .ant-radio-inner,.profile-page.theme-dark .password-form[data-v-5d9f005a] .ant-checkbox-checked .ant-checkbox-inner,.profile-page.theme-dark .password-form[data-v-5d9f005a] .ant-radio-checked .ant-radio-inner,.profile-page.theme-dark .profile-form[data-v-5d9f005a] .ant-checkbox-checked .ant-checkbox-inner,.profile-page.theme-dark .profile-form[data-v-5d9f005a] .ant-radio-checked .ant-radio-inner{background-color:#1890ff;border-color:#1890ff}
-.profile-page.theme-dark[data-v-5d9f005a] .ant-pagination .ant-pagination-item:hover{border-color:#1890ff}
-.profile-page.theme-dark[data-v-5d9f005a] .ant-pagination .ant-pagination-item-active{background:#1890ff;border-color:#1890ff}
-.profile-page.theme-dark[data-v-5d9f005a] .ant-btn.ant-btn-default:hover{border-color:#1890ff;color:#1890ff}
-.billing-page .plan-card.highlight[data-v-7e024594]{border:1px solid rgba(24,144,255,.35)}
+.exchange-tab-title .anticon[data-v-12883e70]{color:#1890ff}
+.profile-page .page-header .page-title .anticon[data-v-12883e70]{color:#1890ff}
+.profile-page .profile-card .profile-info .info-item .anticon[data-v-12883e70]{color:#1890ff}
+.profile-page.theme-dark .edit-card[data-v-12883e70] .ant-tabs-tab-active{color:#1890ff}
+.profile-page.theme-dark .edit-card[data-v-12883e70] .ant-input-password:focus,.profile-page.theme-dark .edit-card[data-v-12883e70] .ant-input-password:hover,.profile-page.theme-dark .edit-card[data-v-12883e70] .ant-input:focus,.profile-page.theme-dark .edit-card[data-v-12883e70] .ant-input:hover{border-color:#1890ff}
+.profile-page.theme-dark[data-v-12883e70] .ant-table-wrapper .ant-tag-blue{background:rgba(24,144,255,.25);border-color:#1890ff;color:#69c0ff}
+.profile-page.theme-dark .notification-settings-form[data-v-12883e70] .ant-checkbox-checked .ant-checkbox-inner,.profile-page.theme-dark .notification-settings-form[data-v-12883e70] .ant-radio-checked .ant-radio-inner,.profile-page.theme-dark .password-form[data-v-12883e70] .ant-checkbox-checked .ant-checkbox-inner,.profile-page.theme-dark .password-form[data-v-12883e70] .ant-radio-checked .ant-radio-inner,.profile-page.theme-dark .profile-form[data-v-12883e70] .ant-checkbox-checked .ant-checkbox-inner,.profile-page.theme-dark .profile-form[data-v-12883e70] .ant-radio-checked .ant-radio-inner{background-color:#1890ff;border-color:#1890ff}
+.profile-page.theme-dark[data-v-12883e70] .ant-pagination .ant-pagination-item:hover{border-color:#1890ff}
+.profile-page.theme-dark[data-v-12883e70] .ant-pagination .ant-pagination-item-active{background:#1890ff;border-color:#1890ff}
+.profile-page.theme-dark[data-v-12883e70] .ant-btn.ant-btn-default:hover{border-color:#1890ff;color:#1890ff}
+.billing-page .plan-card.highlight[data-v-d87d10ca]{border:1px solid rgba(24,144,255,.35)}
 .usdt-checkout .checkout-body .info-section .addr-box .copy-btn:hover,.usdt-checkout .checkout-body .info-section .amt-box .copy-btn:hover{background:rgba(24,144,255,.08);color:#1890ff}
 .usdt-chain-picker-wrap .chain-picker-body .chain-option:hover{border-color:rgba(24,144,255,.5);background:rgba(24,144,255,.04)}
 .usdt-chain-picker-wrap .chain-picker-body .chain-option.selected{border-color:#1890ff;background:rgba(24,144,255,.06);-webkit-box-shadow:0 0 0 3px rgba(24,144,255,.1);box-shadow:0 0 0 3px rgba(24,144,255,.1)}
@@ -400,21 +400,25 @@ body.dark .usdt-checkout .checkout-body .info-section .addr-box .copy-btn:hover,
 .agent-tokens-page.theme-dark[data-v-14bb9f0a] .ant-tabs-ink-bar{background-color:#1890ff}
 .agent-tokens-page.theme-dark[data-v-14bb9f0a] .ant-pagination-item-active{border-color:#1890ff}
 .agent-tokens-page.theme-dark[data-v-14bb9f0a] .ant-pagination-item-active a{color:#1890ff}
-.settings-page .settings-header .page-title .anticon[data-v-2c8688d2]{color:#1890ff}
-.settings-page .settings-nav .settings-menu[data-v-2c8688d2] .ant-menu-item:hover{background:rgba(24,144,255,.06);color:#1890ff}
-.settings-page .settings-nav .settings-menu[data-v-2c8688d2] .ant-menu-item:hover .anticon{color:#1890ff}
-.settings-page .settings-nav .settings-menu[data-v-2c8688d2] .ant-menu-item.ant-menu-item-selected{background:linear-gradient(135deg,rgba(24,144,255,.1),rgba(19,194,194,.08));color:#1890ff}
-.settings-page .settings-nav .settings-menu[data-v-2c8688d2] .ant-menu-item.ant-menu-item-selected .anticon{color:#1890ff}
-.settings-page .settings-detail .detail-header .detail-icon[data-v-2c8688d2]{color:#1890ff}
-.settings-page .settings-detail .search-result-group-tag[data-v-2c8688d2]{background:rgba(24,144,255,.08);color:#1890ff}
-.settings-page .openrouter-balance-card .ant-card[data-v-2c8688d2]{background:linear-gradient(135deg,#e6f7ff,#f0f5ff);border:1px solid #91d5ff}
-.settings-page .openrouter-balance-card .balance-header .balance-title[data-v-2c8688d2]{color:#1890ff}
-.settings-page .settings-form[data-v-2c8688d2] .ant-form-item-label .form-label-with-tooltip .help-icon:hover{color:#1890ff}
-.settings-page .settings-form[data-v-2c8688d2] .ant-form-item-label .form-label-with-tooltip .api-link{color:#1890ff;background:rgba(24,144,255,.08)}
-.settings-page .settings-form[data-v-2c8688d2] .ant-form-item-label .form-label-with-tooltip .api-link:hover{background:rgba(24,144,255,.15)}
-.settings-page.theme-dark .settings-form[data-v-2c8688d2] .ant-form-item-label .form-label-with-tooltip .api-link{background:rgba(24,144,255,.15)}
-.settings-page.theme-dark .settings-form[data-v-2c8688d2] .ant-form-item-label .form-label-with-tooltip .api-link:hover{background:rgba(24,144,255,.25)}
-.settings-page.theme-dark .settings-form[data-v-2c8688d2] .ant-input-number:focus,.settings-page.theme-dark .settings-form[data-v-2c8688d2] .ant-input-number:hover,.settings-page.theme-dark .settings-form[data-v-2c8688d2] .ant-input-password:focus,.settings-page.theme-dark .settings-form[data-v-2c8688d2] .ant-input-password:hover,.settings-page.theme-dark .settings-form[data-v-2c8688d2] .ant-input:focus,.settings-page.theme-dark .settings-form[data-v-2c8688d2] .ant-input:hover,.settings-page.theme-dark .settings-form[data-v-2c8688d2] .ant-select-selection:focus,.settings-page.theme-dark .settings-form[data-v-2c8688d2] .ant-select-selection:hover{border-color:#1890ff}
+.settings-page .settings-header .page-title .anticon[data-v-013a967f]{color:#1890ff}
+.settings-page .settings-nav .settings-menu[data-v-013a967f] .ant-menu-item:hover{background:rgba(24,144,255,.06);color:#1890ff}
+.settings-page .settings-nav .settings-menu[data-v-013a967f] .ant-menu-item:hover .anticon{color:#1890ff}
+.settings-page .settings-nav .settings-menu[data-v-013a967f] .ant-menu-item.ant-menu-item-selected{background:linear-gradient(135deg,rgba(24,144,255,.1),rgba(19,194,194,.08));color:#1890ff}
+.settings-page .settings-nav .settings-menu[data-v-013a967f] .ant-menu-item.ant-menu-item-selected .anticon{color:#1890ff}
+.settings-page .settings-detail .detail-header .detail-icon[data-v-013a967f]{color:#1890ff}
+.settings-page .settings-detail .search-result-group-tag[data-v-013a967f]{background:rgba(24,144,255,.08);color:#1890ff}
+.settings-page .commercial-license-notice .contact-link[data-v-013a967f]{color:#1890ff}
+.settings-page .commercial-license-notice .contact-link[data-v-013a967f]:hover{color:#096dd9}
+.settings-page .openrouter-balance-card .ant-card[data-v-013a967f]{background:linear-gradient(135deg,#e6f7ff,#f0f5ff);border:1px solid #91d5ff}
+.settings-page .openrouter-balance-card .balance-header .balance-title[data-v-013a967f]{color:#1890ff}
+.settings-page .settings-form[data-v-013a967f] .ant-form-item-label .form-label-with-tooltip .help-icon:hover{color:#1890ff}
+.settings-page .settings-form[data-v-013a967f] .ant-form-item-label .form-label-with-tooltip .api-link{color:#1890ff;background:rgba(24,144,255,.08)}
+.settings-page .settings-form[data-v-013a967f] .ant-form-item-label .form-label-with-tooltip .api-link:hover{background:rgba(24,144,255,.15)}
+.settings-page.theme-dark .commercial-license-notice .contact-link[data-v-013a967f]{color:#69c0ff}
+.settings-page.theme-dark .commercial-license-notice .contact-link[data-v-013a967f]:hover{color:#91d5ff}
+.settings-page.theme-dark .settings-form[data-v-013a967f] .ant-form-item-label .form-label-with-tooltip .api-link{background:rgba(24,144,255,.15)}
+.settings-page.theme-dark .settings-form[data-v-013a967f] .ant-form-item-label .form-label-with-tooltip .api-link:hover{background:rgba(24,144,255,.25)}
+.settings-page.theme-dark .settings-form[data-v-013a967f] .ant-input-number:focus,.settings-page.theme-dark .settings-form[data-v-013a967f] .ant-input-number:hover,.settings-page.theme-dark .settings-form[data-v-013a967f] .ant-input-password:focus,.settings-page.theme-dark .settings-form[data-v-013a967f] .ant-input-password:hover,.settings-page.theme-dark .settings-form[data-v-013a967f] .ant-input:focus,.settings-page.theme-dark .settings-form[data-v-013a967f] .ant-input:hover,.settings-page.theme-dark .settings-form[data-v-013a967f] .ant-select-selection:focus,.settings-page.theme-dark .settings-form[data-v-013a967f] .ant-select-selection:hover{border-color:#1890ff}
 .turnstile-container .turnstile-error a[data-v-20437450]{color:#1890ff}
 .main .login-method-switch a[data-v-de9678f6]:hover{color:#1890ff}
 .main .login-method-switch a.active[data-v-de9678f6]{color:#1890ff;border-bottom-color:#1890ff}
