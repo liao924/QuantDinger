@@ -46,7 +46,7 @@
 
   <p style="margin-top: 1.45rem; margin-bottom: 10px;">
     <a href="../LICENSE"><img src="https://img.shields.io/badge/License-Apache%202.0-blue.svg?style=flat-square&logo=apache" alt="License"></a>
-    <img src="https://img.shields.io/badge/Version-3.0.3-orange?style=flat-square" alt="Version">
+    <img src="https://img.shields.io/badge/Version-3.0.5-orange?style=flat-square" alt="Version">
     <img src="https://img.shields.io/badge/Python-3.10%2B%20%7C%20Docker%20镜像%203.12-3776AB?style=flat-square&logo=python&logoColor=white" alt="Python">
     <img src="https://img.shields.io/badge/Docker-Compose%20Ready-2496ED?style=flat-square&logo=docker&logoColor=white" alt="Docker">
     <img src="https://img.shields.io/badge/Frontend-预构建-1f8b4c?style=flat-square" alt="Frontend">
@@ -71,7 +71,7 @@
 
 ---
 
-> QuantDinger 是**可自托管、本地优先**的量化平台：把 **AI 辅助研究**、**Python 原生策略**、**回测** 与 **实盘**（加密货币、IBKR 美股、MT5 外汇）放在**同一套产品**里，而不是图表、脚本、机器人和面板各自为政。
+> QuantDinger 是**可自托管、本地优先**的量化平台：把 **AI 辅助研究**、**Python 原生策略**、**回测** 与 **实盘**（加密货币、IBKR 美股、MT5 外汇、Alpaca 美股/ETF/加密货币）放在**同一套产品**里，而不是图表、脚本、机器人和面板各自为政。
 
 <div align="center">
   <img src="screenshots/architecture.png" alt="QuantDinger 系统架构：行情数据 → 指标 / 信号 / 策略 / 回测 / AI 分析五层引擎 → 实盘执行，并闭合「想法 → 指标 → 策略 → 回测 → 优化 → 执行 → 监控」的量化工作流" width="960">
@@ -223,7 +223,7 @@ quantdinger-mcp
 
 ## 产品概览
 
-QuantDinger 是**可自托管**的量化操作系统：**AI 辅助研究**、**Python 原生策略**（`IndicatorStrategy` + `ScriptStrategy`）、**回测**与**实盘**（加密货币、IBKR、MT5），并可选多用户、通知、积分与 USDT 计费。用**一套 Compose** 替代「图表 + Notebook + 机器人 + 外挂 LLM」的拼装，凭证在 **PostgreSQL** 与 **`.env`**。
+QuantDinger 是**可自托管**的量化操作系统：**AI 辅助研究**、**Python 原生策略**（`IndicatorStrategy` + `ScriptStrategy`）、**回测**与**实盘**（加密货币、IBKR、MT5、Alpaca），并可选多用户、通知、积分与 USDT 计费。用**一套 Compose** 替代「图表 + Notebook + 机器人 + 外挂 LLM」的拼装，凭证在 **PostgreSQL** 与 **`.env`**。
 
 | 常见 DIY 拼装 | QuantDinger |
 |--------------|-------------|
@@ -266,7 +266,7 @@ QuantDinger 是**可自托管**的量化操作系统：**AI 辅助研究**、**P
 - **研究与 AI** — 多 LLM 分析、自选、分析历史；可选协同/校准；NL→指标/策略；回测后 AI 建议；Polymarket 作**研究**向工作流。**[Agent 网关 + MCP](#mcp-agent-gateway)** 对接 Cursor / Claude Code / Codex 等。
 - **构建** — `IndicatorStrategy`（表格式信号、图表叠加）与 `ScriptStrategy`（`on_bar`、显式下单）；专业 K 线界面。
 - **验证** — 服务端回测、指标、资金曲线、策略快照。
-- **运营** — 加密货币执行、快速交易、IBKR / MT5；Telegram、邮件、短信、Discord、Webhook。
+- **运营** — 加密货币执行、快速交易、IBKR / MT5 / Alpaca（美股、ETF、加密货币），通知接 Telegram、邮件、短信、Discord、Webhook。**统一经纪商账户页**集中管理三家券商的连接、账户 KPI、持仓与挂单撤单。
 - **平台** — Docker Compose、Postgres、Redis、OAuth、多用户形态、积分/会员/USDT 计费开关。
 
 ## 架构
@@ -303,7 +303,7 @@ flowchart LR
     subgraph EXT[外部集成]
         LLM[LLM 提供商]
         EXCH[加密货币交易所]
-        BROKER[IBKR / MT5]
+        BROKER[IBKR / MT5 / Alpaca]
         MARKET[行情 / 新闻]
         PAY[TronGrid / USDT 支付]
         NOTIFY[Telegram / Email / SMS / Webhook]
@@ -493,9 +493,12 @@ df["sell"] = sell.fillna(False).astype(bool)
 
 | 市场 | 经纪商 / 数据源 | 执行方式 |
 |------|------------------|----------|
-| 美股 | IBKR、Yahoo Finance、Finnhub | 通过 IBKR |
+| 美股 | IBKR、Alpaca、Yahoo Finance、Finnhub | IBKR 或 Alpaca（纸面 + 真实账户）|
+| ETF | Alpaca | 通过 Alpaca（纸面 + 真实账户）|
 | 外汇 | MT5、OANDA | 通过 MT5 |
 | 期货 | 交易所与数据接入 | 数据与工作流支持 |
+
+> **经纪商账户页（`/broker-accounts`，v3.0.5+）** — IBKR、MT5、Alpaca 共用一个统一管理页面：每家券商各一个连接表单 + 账户 KPI + 持仓表 + 挂单表（含一键撤单）。多租户安全：通过 `BrokerSessionRegistry` 隔离每个用户的会话，一个用户重连不会把其他用户踢下线。
 
 ### 预测市场
 
@@ -587,7 +590,7 @@ QuantDinger/
 
 ### QuantDinger 只适合做加密货币吗？
 
-不是。加密货币是核心场景之一，但平台也支持 IBKR 的美股链路、MT5 的外汇链路，以及 Polymarket 的研究型分析工作流。
+不是。加密货币是核心场景之一，但平台也支持 IBKR / Alpaca 的美股 / ETF 链路（Alpaca 还支持加密货币）、MT5 的外汇链路，以及 Polymarket 的研究型分析工作流。
 
 ### 我可以直接写 Python 策略吗？
 

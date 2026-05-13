@@ -46,7 +46,7 @@
 
   <p style="margin-top: 1.45rem; margin-bottom: 10px;">
     <a href="../LICENSE"><img src="https://img.shields.io/badge/License-Apache%202.0-blue.svg?style=flat-square&logo=apache" alt="License"></a>
-    <img src="https://img.shields.io/badge/Version-3.0.3-orange?style=flat-square" alt="Version">
+    <img src="https://img.shields.io/badge/Version-3.0.5-orange?style=flat-square" alt="Version">
     <img src="https://img.shields.io/badge/Python-3.10%2B%20%7C%20Docker%203.12-3776AB?style=flat-square&logo=python&logoColor=white" alt="Python">
     <img src="https://img.shields.io/badge/Docker-Compose-2496ED?style=flat-square&logo=docker&logoColor=white" alt="Docker">
     <img src="https://img.shields.io/github/stars/brokermr810/QuantDinger?style=flat-square&logo=github" alt="Stars">
@@ -61,7 +61,7 @@
 
 ---
 
-> QuantDinger เป็นแพลตฟอร์มเทรดเชิงปริมาณแบบ **self-hosted และเน้นโลคัล** รวม **การวิจัยช่วยด้วย AI** **กลยุทธ์ Python แบบเนทีฟ** **การทดสอบย้อนหลัง** และ **การเทรดจริง** (คริปโต IBKR หุ้นสหรัฐ MT5 FX) ไว้ใน **ผลิตภัณฑ์เดียว**
+> QuantDinger เป็นแพลตฟอร์มเทรดเชิงปริมาณแบบ **self-hosted และเน้นโลคัล** รวม **การวิจัยช่วยด้วย AI** **กลยุทธ์ Python แบบเนทีฟ** **การทดสอบย้อนหลัง** และ **การเทรดจริง** (คริปโต, IBKR หุ้นสหรัฐ, MT5 FX, Alpaca หุ้นสหรัฐ / ETF / คริปโต) ไว้ใน **ผลิตภัณฑ์เดียว**
 
 <div align="center">
   <img src="screenshots/architecture.png" alt="สถาปัตยกรรม QuantDinger" width="960">
@@ -122,7 +122,7 @@ docker-compose up -d --build
 
 ## ภาพรวมผลิตภัณฑ์
 
-สภาพแวดล้อมรวม **AI + กลยุทธ์ Python + การทดสอบย้อนหลัง + เทรดจริง** ที่โฮสต์เองได้ ข้อมูลรับรองอยู่ใน **PostgreSQL** และ **`.env`** การเชื่อมต่อตลาดคริปโต IBKR MT5 และ LLM ผ่านตัวแปรสภาพแวดล้อม
+สภาพแวดล้อมรวม **AI + กลยุทธ์ Python + การทดสอบย้อนหลัง + เทรดจริง** ที่โฮสต์เองได้ ข้อมูลรับรองอยู่ใน **PostgreSQL** และ **`.env`** การเชื่อมต่อตลาดคริปโต IBKR MT5 Alpaca และ LLM ผ่านตัวแปรสภาพแวดล้อม
 
 ## ทัวร์ภาพ
 
@@ -150,7 +150,7 @@ docker-compose up -d --build
 - **วิจัย & AI** — วิเคราะห์หลาย LLM รายการโปรด ประวัติ NL→โค้ด เวิร์กโฟลว์ Polymarket การเชื่อม **Agent / MCP**
 - **สร้าง** — `IndicatorStrategy` และ `ScriptStrategy` (`on_bar`) UI แท่งเทียนระดับโปร
 - **ตรวจสอบ** — ทดสอบย้อนหลังฝั่งเซิร์ฟเวอร์ เส้น equity
-- **ปฏิบัติการ** — ดำเนินการคริปโต เทรดเร็ว IBKR / MT5 Telegram อีเมล Discord Webhook ฯลฯ
+- **ปฏิบัติการ** — ดำเนินการคริปโต เทรดเร็ว IBKR / MT5 / Alpaca (หุ้นสหรัฐ · ETF · คริปโต) Telegram อีเมล Discord Webhook ฯลฯ
 - **แพลตฟอร์ม** — Docker Compose Postgres Redis OAuth หลายผู้ใช้ เครดิต สมาชิก USDT สวิตช์การเรียกเก็บเงิน
 
 ## สถาปัตยกรรม
@@ -179,7 +179,7 @@ flowchart LR
     subgraph EXT[ภายนอก]
         LLM[LLM]
         EXCH[ตลาด]
-        BROKER[IBKR / MT5]
+        BROKER[IBKR / MT5 / Alpaca]
     end
 
     U --> WEB --> NG --> API
@@ -221,7 +221,7 @@ flowchart LR
 
 **โฮสต์เองได้จริงหรือ?** ได้ ใช้ Docker Compose บนโครงสร้างของคุณ
 
-**มีแค่คริปโตหรือ?** ไม่ใช่ รองรับ IBKR (หุ้นสหรัฐ) MT5 (FX) และ Polymarket สำหรับงานวิจัย
+**มีแค่คริปโตหรือ?** ไม่ใช่ รองรับ IBKR / Alpaca (หุ้นสหรัฐ · ETF · คริปโต) MT5 (FX) และ Polymarket สำหรับงานวิจัย
 
 **เขียนกลยุทธ์ด้วย Python ได้ไหม?** ได้ รองรับ `IndicatorStrategy` และ `ScriptStrategy`
 

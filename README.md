@@ -46,7 +46,7 @@
 
   <p style="margin-top: 1.45rem; margin-bottom: 10px;">
     <a href="LICENSE"><img src="https://img.shields.io/badge/License-Apache%202.0-blue.svg?style=flat-square&logo=apache" alt="License"></a>
-    <img src="https://img.shields.io/badge/Version-3.0.3-orange?style=flat-square" alt="Version">
+    <img src="https://img.shields.io/badge/Version-3.0.5-orange?style=flat-square" alt="Version">
     <img src="https://img.shields.io/badge/Python-3.10%2B%20%7C%20Docker%20image%203.12-3776AB?style=flat-square&logo=python&logoColor=white" alt="Python">
     <img src="https://img.shields.io/badge/Docker-Compose%20Ready-2496ED?style=flat-square&logo=docker&logoColor=white" alt="Docker">
     <img src="https://img.shields.io/badge/Frontend-Prebuilt-1f8b4c?style=flat-square" alt="Frontend">
@@ -71,7 +71,7 @@
 
 ---
 
-> QuantDinger is a **self-hosted, local-first** quantitative platform: **AI-assisted research**, **Python-native strategies**, **backtesting**, and **live trading** (crypto, IBKR stocks, MT5 forex) in one product—not a loose collection of scripts and SaaS tabs.
+> QuantDinger is a **self-hosted, local-first** quantitative platform: **AI-assisted research**, **Python-native strategies**, **backtesting**, and **live trading** (crypto, IBKR stocks, MT5 forex, Alpaca US stocks/ETFs/crypto) in one product—not a loose collection of scripts and SaaS tabs.
 
 <div align="center">
   <img src="docs/screenshots/architecture.png" alt="QuantDinger system architecture: Data Sources → Indicator / Signal / Strategy / Backtesting / AI Analysis layers → Execution, with the closed-loop quant workflow (Idea → Indicator → Strategy → Backtest → Optimize → Execute → Monitor)" width="960">
@@ -221,7 +221,7 @@ Deeper links: [AI Integration design](docs/agent/AI_INTEGRATION_DESIGN.md) · [Q
 
 ## Product overview
 
-QuantDinger is a **self-hosted** quantitative OS: **AI-assisted research**, **Python-native strategies** (`IndicatorStrategy` + `ScriptStrategy`), **backtesting**, and **live trading** (crypto, IBKR, MT5)—with optional multi-user roles, notifications, credits, and USDT billing. It replaces a patchwork of charts, notebooks, bots, and disconnected LLM chats with **one Compose stack** and **your** credentials in Postgres + `.env`.
+QuantDinger is a **self-hosted** quantitative OS: **AI-assisted research**, **Python-native strategies** (`IndicatorStrategy` + `ScriptStrategy`), **backtesting**, and **live trading** (crypto, IBKR, MT5, Alpaca)—with optional multi-user roles, notifications, credits, and USDT billing. It replaces a patchwork of charts, notebooks, bots, and disconnected LLM chats with **one Compose stack** and **your** credentials in Postgres + `.env`.
 
 | Typical DIY stack | QuantDinger |
 |-------------------|-------------|
@@ -264,7 +264,7 @@ QuantDinger is a **self-hosted** quantitative OS: **AI-assisted research**, **Py
 - **Research & AI** — Multi-LLM analysis, watchlists, analysis history; optional ensemble/calibration; NL→indicator/strategy; post-backtest AI hints; Polymarket as a **research** workflow. **[Agent Gateway + MCP](#use-it-from-an-ai-agent-cursor--claude-code--codex--mcp)** for Cursor / Claude Code / Codex.
 - **Build** — `IndicatorStrategy` (dataframe signals, chart overlays) and `ScriptStrategy` (`on_bar`, explicit orders); professional chart UI.
 - **Validate** — Server-side backtests, metrics, equity curves, strategy snapshots.
-- **Operate** — Crypto execution, quick trade, IBKR / MT5, notifications (Telegram, email, SMS, Discord, webhooks).
+- **Operate** — Crypto execution, quick trade, IBKR / MT5 / Alpaca (US stocks, ETFs, crypto), notifications (Telegram, email, SMS, Discord, webhooks). **Unified Broker Accounts page** centralises connection, account KPIs, positions and open-order management across all brokers.
 - **Platform** — Docker Compose, Postgres, Redis, OAuth, multi-user patterns, credits / membership / USDT billing toggles.
 
 ## Architecture
@@ -301,7 +301,7 @@ flowchart LR
     subgraph EXT[External Integrations]
         LLM[LLM Providers]
         EXCH[Crypto Exchanges]
-        BROKER[IBKR / MT5]
+        BROKER[IBKR / MT5 / Alpaca]
         MARKET[Market Data / News]
         PAY[TronGrid / USDT Payment]
         NOTIFY[Telegram / Email / SMS / Webhook]
@@ -502,9 +502,12 @@ See full examples:
 
 | Market | Broker / Source | Execution |
 |--------|------------------|-----------|
-| US Stocks | IBKR, Yahoo Finance, Finnhub | Via IBKR |
+| US Stocks | IBKR, Alpaca, Yahoo Finance, Finnhub | Via IBKR or Alpaca (paper + live) |
+| ETFs | Alpaca | Via Alpaca (paper + live) |
 | Forex | MT5, OANDA | Via MT5 |
 | Futures | Exchange and data integrations | Data and workflow support |
+
+> **Broker Accounts page (`/broker-accounts`, v3.0.5+)** — IBKR, MT5 and Alpaca share a single unified management page: per-broker connect form, account KPIs, positions table and open-order management with one-click cancel. Multi-tenant safe: each user's session is isolated via `BrokerSessionRegistry`, so one user reconnecting doesn't kick everyone else off.
 
 ### Prediction Markets
 
@@ -597,7 +600,7 @@ Yes. The default deployment model is your own Docker Compose stack with your own
 
 ### Is QuantDinger only for crypto trading?
 
-No. Crypto is a major focus, but the platform also includes IBKR workflows for US stocks, MT5 workflows for forex, and Polymarket research support.
+No. Crypto is a major focus, but the platform also includes IBKR and Alpaca workflows for US stocks / ETFs (Alpaca additionally covers crypto), MT5 workflows for forex, and Polymarket research support.
 
 ### Can I write strategies directly in Python?
 

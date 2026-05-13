@@ -4,6 +4,102 @@ This document records version updates, new features, bug fixes, and database mig
 
 ---
 
+## V3.0.5 (2026-05-13) — Alpaca / Smart Tuning v2 / IS-OOS 双面板 / 经纪商统一面板 / DB 启动自愈
+
+本版合并了过去两周累积的「让回测更科学、让多券商管理更顺手、让本地部署更不容易踩坑」的改动。其中**回测科学性**是这次最值得说的事——之前智能调参在训练段（IS）上给出 +36% 头条数字，用户把参数应用回完整窗口跑出 -24%，这种沉默过拟合是本次重点修复对象。同时新增 **Alpaca Markets** 作为第三家「传统经纪商」适配器，与 IBKR / MT5 平级。
+
+### 🚀 New Features
+
+#### Alpaca Markets 适配器（美股 / ETF / 加密货币 · paper + live）
+作为第三种「传统经纪商」并入 QuantDinger，与 IBKR / MT5 平级（来源 [PR #101](https://github.com/brokermr810/QuantDinger/pull/101)）：
+- **覆盖**：US 股票、ETF、加密货币现货；纸面 (`paper-api.alpaca.markets`) 和真实 (`api.alpaca.markets`) 账户均可
+- **adapter**：`backend_api_python/app/services/alpaca_trading/`（client / symbols / 错误规范化 / OHLCV）
+- **路由**：`/api/alpaca/connect|status|account|positions|orders|symbols`
+- **多租户**：与 IBKR 一起接入新的 `BrokerSessionRegistry`，每个用户独立 client，不再共享全局连接
+- **零 referral 干扰**：审过整个适配器代码，无 referral / partner code 类隐藏标识
+
+#### 统一经纪商账户页面（`/broker-accounts`）
+原先 IBKR / MT5 / Alpaca / 加密货币交易所的连接入口散落在不同位置，现合并为一个统一管理页：
+- 头部摘要 + Alpaca / IBKR / MT5 三个 panel（连接表单 + 账户 KPI + 持仓表 + 挂单表 + 一键撤单）
+- 加密货币交易所凭据作为一张独立卡片列出，复用现有 `ExchangeAccountModal`
+- 前端通过 `src/api/broker.js` 统一各家不一致的端点结构
+
+#### 智能调参 v2（Smart Tuning）—— 多参数策略真正可用
+之前的「智能调参」实际只扫止盈 / 止损 / 杠杆 3 个维度，RSI / MACD / EMA / ATR 这种多参数策略基本无法调参。本版把它做成真正的多维寻优：
+- **P1 · 自动推断 sweep 范围**：指标里写 `# @param rsi_len int 14 RSI period` 就够，不用手写 `range=`，前端基于 default × `[0.5, 0.75, 1, 1.25, 1.75]` 自动生成扫参网格（int 类型自动取整、去重）
+- **P2 ·「可调维度」面板**：在结构化调参卡片里一目了然列出所有维度（带 risk / position / leverage / `@param` declared / `@param` inferred 五色徽标），实时显示完整笛卡尔积大小与候选预算，每个维度都可勾选取消
+- **P3 · 维度爆炸自动切 DE**：完整笛卡尔积 > 候选预算 × 10 时（默认 480），grid 自动切换到 Differential Evolution，避免「扫了等于没扫」，UI 显示蓝色提示「已自动切换到 DE」
+- **P4 · trailing 维度自动加入**：策略 `@strategy trailingEnabled=true` 时，自动追加 `trailing.pct` 和 `trailing.activationPct` 两个扫参维度
+
+#### IS-OOS 双面板 + 应用按钮分流
+解决了一个长期沉默的过拟合陷阱（智能调参在 70% 训练段上给 +36% 头条数字，应用到完整窗口含 30% 验证段后跑出 -24%，但 UI 上完全看不出来）：
+- **最佳候选卡片** 改成 IS / OOS 并排展示，红框警示「OOS 退化 X%，疑似过拟合」
+- **原来的「应用最佳参数」按钮拆成三个动作**：
+  - 应用并在训练段验证（复现 +36% 头条数字）
+  - 应用并在完整窗口跑（含 OOS 段，看真实表现）
+  - 只应用参数（不立即跑回测）
+- 后端 `ExperimentRunnerService._build_best_output` 暴露 `oosSummary` / `oosScore` / `oosDegradation` / `oosOverfit` 给前端
+
+#### Crypto 行情时间框架后端 resample
+当交易所原生不提供某个时间框架（如 OKX 没有 30m）时，后端自动取更细粒度的 OHLCV 数据并按交易所对齐 resample。前端无需关心，13 个新单测覆盖（来源 [PR #104](https://github.com/brokermr810/QuantDinger/pull/104)）。
+
+### 🛠️ 工程改进
+
+#### 数据库启动自治（解决「本地 PG 部署 `relation does not exist` / `权限不够` 满屏」）
+之前本地 PostgreSQL（非 docker）部署必须手工 `psql -f migrations/init.sql` 才能建表，否则 worker 起来满屏 `relation "pending_orders" does not exist` / `qd_strategy_positions 权限不够`；docker 部署不会踩这个坑（容器 entrypoint 自动跑 init.sql）。现在：
+- `init_database()` 每次启动**自动 apply** `migrations/init.sql`（全幂等 `CREATE TABLE IF NOT EXISTS`，docker 二次跑无害）
+- 启动后做一次轻量**权限自检**：对 `qd_users` / `pending_orders` / `qd_strategy_positions` / `qd_strategies_trading` / `qd_analysis_memory` 五个关键表跑 `SELECT 1 LIMIT 0`，任何 `InsufficientPrivilege` 失败立刻打头条 banner 给出 `ALTER TABLE OWNER` 修复配方，而不是让权限错误淹在每秒的 worker 日志里
+- 新 env: `SKIP_AUTO_MIGRATE=true` 作为外部 schema 管理（Flyway / Liquibase / DBA 手工）的逃生口
+
+#### 多租户经纪商会话（`BrokerSessionRegistry`）
+`backend_api_python/app/utils/broker_session.py` 提供按 `(user_id, broker_name)` 缓存的 client 注册表，加 `threading.Lock` 保护。把原本 IBKR / Alpaca 共用全局 `_client` 改为按用户隔离，避免「一个用户重连把所有用户踢下线」。
+
+#### OAuth `FRONTEND_URL` 支持多前端
+`backend_api_python/app/services/oauth_service.py` 现在把 `FRONTEND_URL` 解析为逗号分隔列表：第一个作为默认登录后重定向 origin，全部作为 OAuth 重定向白名单。便于一套后端同时给 `ai.quantdinger.com` + `m.quantdinger.com` 两个域提供服务。
+
+#### 默认指标精简 + SuperTrend 示例国际化
+新用户注册原本默认塞 4 个内置指标，现简化为 **1 个高质量 SuperTrend 示例**：全英文注释 + `@param` 范围标注 + Wilder ATR 平滑、路径依赖 SuperTrend 计算的标准实现，开箱即跑且展示推荐的多参数策略写法。
+
+### 🐛 Bug 修复
+
+- **指标市场综合评分全为 0**（V3.0.4，已合并入本版）：`community_service.py` 读字段拼错（`'overall'` 实际字段是 `'overallScore'`），所有上架策略综合分都显示 0；4 个回归测试补齐
+- **风险-收益分布坐标轴单位错误**：散点图坐标轴单位把已经是百分比的 `totalReturn` / `maxDrawdown` 再乘 100，显示为「百分之好几千」，已修
+- **`runBacktest` 时间窗口覆盖**：方法签名加入 `options.dateRangeOverride`，允许「应用并在训练段验证」这种行为复用完整 `runBacktest` 路径
+- **i18n key 漏写**：调参维度面板部分 label 直接显示 `indicatorIde.stopLossPct` 而不是「止损 (%)」—— 补齐 4 个缺失 key × 10 locale (`stopLossPct` / `takeProfitPct` / `trailingStopPct` / `trailingActivationPct`)，并把 label 解析改用 `$te()`（translation exists 检查）防御未来再有遗漏
+- **Smart Tuning 12 个 IS/OOS 相关 i18n key** 同步铺到 10 个 locale
+
+### ⚙️ 配置变化
+
+| 变量 | 默认 | 作用 |
+|---|---|---|
+| `SKIP_AUTO_MIGRATE` | `false` | 启动时不自动 apply `migrations/init.sql`（外部 schema 管理时设 true） |
+| `FRONTEND_URL` | `http://localhost:8080` | 现支持逗号分隔多个 origin，全部进 OAuth 白名单；第一个作默认重定向 |
+
+### ✅ 测试
+
+新增 14 个回归测试，全套 **115/115 通过**：
+- `tests/test_db_bootstrap.py` —— 6 个（auto-migrate 幂等 / `init.sql` 缺失兜底 / SQL 失败不崩 / `_verify_table_access` 全绿 / 多个权限失败汇总 banner / `SKIP_AUTO_MIGRATE` 逃生口）
+- `tests/test_experiment_services.py::test_evolution_sweeps_indicator_level_params` —— 1 个（确认 `indicator_params.atr_period` 路径走通 snapshot + overrides）
+- `tests/test_experiment_best_output.py` —— 3 个（OOS metrics surfacing：`oosSummary` / `oosScore` / `oosDegradation` / `oosOverfit`）
+- `tests/test_market_indicator_score.py` —— 4 个（综合评分 `'overall'` → `'overallScore'` 拼写错误回归）
+
+ESLint 对所有触及的 `.vue` / `.js` 文件全绿。
+
+### 📦 兼容性 / 升级建议
+
+- **零破坏性升级**：所有 backend 路由、env 变量、数据库表 schema 全部向后兼容
+- **数据库**：首次启动会自动 apply `migrations/init.sql`；如果你的 PG 用户不是表 owner，启动日志里会出 banner 指引你跑一次 `ALTER TABLE ... OWNER TO <user>;` 一键修好
+- **前端**：需要 build `QuantDinger-Vue-src` 并替换 `frontend/dist`（仓库内 `frontend/dist` 已经包含本次构建产物）
+- **Alpaca**：需要在生产 `requirements.txt` 加 `alpaca-py>=0.30.0`，或本地 `pip install alpaca-py`（已在 `backend_api_python/requirements.txt` 中加好）
+
+### 🗂️ 文件改动概览
+
+- 后端：`app/services/alpaca_trading/*`、`app/routes/alpaca.py`、`app/services/experiment/runner.py`、`app/services/builtin_indicators.py`、`app/services/oauth_service.py`、`app/utils/db.py`、`app/utils/broker_session.py`、`app/services/community_service.py`
+- 前端：`src/views/indicator-ide/index.vue`、`src/views/broker-accounts/*`、`src/api/broker.js`、`src/locales/lang/*.js`（10 个 locale + 16 个新 key）
+- 文档：`README.md` + 6 个 `docs/README_*.md`（badge → 3.0.5 / 加入 Alpaca）、`env.example`（新 `SKIP_AUTO_MIGRATE`）
+
+---
+
 ## V3.1.0 (2026-05-02) — AI Agent Gateway / MCP HTTP / SSE 进度流 / Admin UI
 
 把 QuantDinger 从「只服务人类用户的 Web 产品」扩展成「同时面向人类和 AI Agent 的两栈产品」。给 OpenClaw / NanoBot / Claude Code / Cursor / Codex 这类 Agent 运行时配齐了：受控的 HTTP 网关、按 Scope 的细粒度授权、异步任务 + 实时进度、MCP 接入、Admin 后台运维面板，以及一份机器可读的契约（OpenAPI 3.0）。**所有 Agent 入口默认拒绝实盘交易**——T 类（Trading）即便给到 Agent，也走纸面订单簿，需要管理员显式开启服务器级开关后才可能走真实交易所。

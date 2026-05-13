@@ -46,7 +46,7 @@
 
   <p style="margin-top: 1.45rem; margin-bottom: 10px;">
     <a href="../LICENSE"><img src="https://img.shields.io/badge/License-Apache%202.0-blue.svg?style=flat-square&logo=apache" alt="License"></a>
-    <img src="https://img.shields.io/badge/Version-3.0.3-orange?style=flat-square" alt="Version">
+    <img src="https://img.shields.io/badge/Version-3.0.5-orange?style=flat-square" alt="Version">
     <img src="https://img.shields.io/badge/Python-3.10%2B%20%7C%20Docker%203.12-3776AB?style=flat-square&logo=python&logoColor=white" alt="Python">
     <img src="https://img.shields.io/badge/Docker-Compose-2496ED?style=flat-square&logo=docker&logoColor=white" alt="Docker">
     <img src="https://img.shields.io/github/stars/brokermr810/QuantDinger?style=flat-square&logo=github" alt="Stars">
@@ -61,7 +61,7 @@
 
 ---
 
-> QuantDinger は **セルフホスト・ローカルファースト** のクオンツ基盤です。**AI 支援リサーチ**、**Python ネイティブ戦略**、**バックテスト**、**ライブ取引**（暗号資産、IBKR 米株、MT5 FX）を **1 つの製品** にまとめます。
+> QuantDinger は **セルフホスト・ローカルファースト** のクオンツ基盤です。**AI 支援リサーチ**、**Python ネイティブ戦略**、**バックテスト**、**ライブ取引**（暗号資産、IBKR 米株、MT5 FX、Alpaca 米株 / ETF / 暗号資産）を **1 つの製品** にまとめます。
 
 <div align="center">
   <img src="screenshots/architecture.png" alt="QuantDinger アーキテクチャ" width="960">
@@ -122,7 +122,7 @@ Git for Windows の Bash なら、上記 macOS/Linux の 1 行コマンドが使
 
 ## 製品概要
 
-セルフホスト可能な **AI + Python 戦略 + バックテスト + ライブ** の一体環境。認証情報は **PostgreSQL** と **`.env`** で管理。暗号取引所、IBKR、MT5、LLM は環境変数で接続。
+セルフホスト可能な **AI + Python 戦略 + バックテスト + ライブ** の一体環境。認証情報は **PostgreSQL** と **`.env`** で管理。暗号取引所、IBKR、MT5、Alpaca、LLM は環境変数で接続。
 
 ## ビジュアルツアー
 
@@ -150,7 +150,7 @@ Git for Windows の Bash なら、上記 macOS/Linux の 1 行コマンドが使
 - **リサーチ & AI** — マルチ LLM 分析、ウォッチリスト、履歴；NL→コード；Polymarket 研究フロー；**Agent / MCP** 連携。
 - **構築** — `IndicatorStrategy` と `ScriptStrategy`（`on_bar`）；プロ向け K 線 UI。
 - **検証** — サーバサイドバックテスト、エクイティカーブ。
-- **運用** — 暗号執行、クイックトレード、IBKR / MT5；Telegram、メール、Discord、Webhook 等。
+- **運用** — 暗号執行、クイックトレード、IBKR / MT5 / Alpaca（米株・ETF・暗号資産）；Telegram、メール、Discord、Webhook 等。
 - **プラットフォーム** — Docker Compose、Postgres、Redis、OAuth、マルチユーザー、クレジット / メンバーシップ / USDT 課金スイッチ。
 
 ## アーキテクチャ
@@ -179,7 +179,7 @@ flowchart LR
     subgraph EXT[外部]
         LLM[LLM]
         EXCH[取引所]
-        BROKER[IBKR / MT5]
+        BROKER[IBKR / MT5 / Alpaca]
     end
 
     U --> WEB --> NG --> API
@@ -221,7 +221,7 @@ AI 機能には `env.example` の **AI / LLM** 節を `.env` に反映し、back
 
 **本当にセルフホストできる？** はい。Docker Compose で自分のインフラ上に展開します。
 
-**暗号だけ？** いいえ。IBKR（米株）、MT5（FX）、Polymarket 研究にも対応。
+**暗号だけ？** いいえ。IBKR・Alpaca（米株・ETF・暗号資産）、MT5（FX）、Polymarket 研究にも対応。
 
 **Python で戦略を書ける？** はい。`IndicatorStrategy` と `ScriptStrategy` をサポート。
 

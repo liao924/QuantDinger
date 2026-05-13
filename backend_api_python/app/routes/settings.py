@@ -138,8 +138,8 @@ CONFIG_SCHEMA = {
                 'key': 'BRAND_APP_VERSION',
                 'label': 'App Version',
                 'type': 'text',
-                'default': '3.0.3',
-                'description': 'Version label shown in the sidebar footer ("V3.0.3"). Frontend bundle version stays unchanged.'
+                'default': '3.0.5',
+                'description': 'Version label shown in the sidebar footer ("V3.0.5"). Frontend bundle version stays unchanged.'
             },
             {
                 'key': 'BRAND_COPYRIGHT',
@@ -1442,7 +1442,7 @@ def get_public_config():
 # fresh install still ships with sane copy / links instead of blanks.
 _BRAND_DEFAULTS = {
     'app_name': 'QuantDinger',
-    'app_version': '3.0.3',
+    'app_version': '3.0.5',
     'copyright': '© 2025-2026 QuantDinger. All rights reserved.',
     'contact_email': 'brokermr810@gmail.com',
     'contact_support_url': 'https://t.me/quantdinger',

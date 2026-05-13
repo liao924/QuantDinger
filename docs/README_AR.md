@@ -46,7 +46,7 @@
 
   <p style="margin-top: 1.45rem; margin-bottom: 10px;" dir="ltr">
     <a href="../LICENSE"><img src="https://img.shields.io/badge/License-Apache%202.0-blue.svg?style=flat-square&logo=apache" alt="License"></a>
-    <img src="https://img.shields.io/badge/Version-3.0.3-orange?style=flat-square" alt="Version">
+    <img src="https://img.shields.io/badge/Version-3.0.5-orange?style=flat-square" alt="Version">
     <img src="https://img.shields.io/badge/Python-3.10%2B%20%7C%20Docker%203.12-3776AB?style=flat-square&logo=python&logoColor=white" alt="Python">
     <img src="https://img.shields.io/badge/Docker-Compose-2496ED?style=flat-square&logo=docker&logoColor=white" alt="Docker">
     <img src="https://img.shields.io/github/stars/brokermr810/QuantDinger?style=flat-square&logo=github" alt="Stars">
@@ -63,7 +63,7 @@
 
 ---
 
-> QuantDinger منصة كمّية **ذاتية الاستضافة وتفضّل المحلي** تجمع **البحث المدعوم بالذكاء الاصطناعي** و**استراتيجيات بايثون الأصلية** و**الاختبار الرجعي** و**التداول المباشر** (عملات مشفّرة، أسهم أمريكية عبر IBKR، فوركس عبر MT5) في **منتج واحد**.
+> QuantDinger منصة كمّية **ذاتية الاستضافة وتفضّل المحلي** تجمع **البحث المدعوم بالذكاء الاصطناعي** و**استراتيجيات بايثون الأصلية** و**الاختبار الرجعي** و**التداول المباشر** (عملات مشفّرة، أسهم أمريكية عبر IBKR، فوركس عبر MT5، أسهم / ETF / عملات مشفّرة عبر Alpaca) في **منتج واحد**.
 
 </div>
 
@@ -140,7 +140,7 @@ docker-compose up -d --build
 
 ## نظرة عامة على المنتج
 
-بيئة موحّدة **للذكاء الاصطناعي + استراتيجيات بايثون + اختبار رجعي + تداول مباشر** قابلة للاستضافة الذاتية. تُدار الاعتمادات عبر **PostgreSQL** و**`.env`**. تُربط البورصات وIBKR وMT5 ونماذج اللغة عبر متغيرات البيئة.
+بيئة موحّدة **للذكاء الاصطناعي + استراتيجيات بايثون + اختبار رجعي + تداول مباشر** قابلة للاستضافة الذاتية. تُدار الاعتمادات عبر **PostgreSQL** و**`.env`**. تُربط البورصات وIBKR وMT5 وAlpaca ونماذج اللغة عبر متغيرات البيئة.
 
 ## جولة بصرية
 
@@ -168,7 +168,7 @@ docker-compose up -d --build
 - **البحث والذكاء الاصطناعي** — تحليل متعدد نماذج اللغة، قوائم المراقبة، السجل؛ NL→كود؛ سير عمل Polymarket؛ تكامل **Agent / MCP**.
 - **البناء** — `IndicatorStrategy` و`ScriptStrategy` (`on_bar`)؛ واجهة شموع احترافية.
 - **التحقق** — اختبار رجعي على الخادم، منحنى رأس المال.
-- **التشغيل** — تنفيذ عملات مشفّرة، تداول سريع، IBKR / MT5؛ Telegram وبريد وDiscord وWebhook وغيرها.
+- **التشغيل** — تنفيذ عملات مشفّرة، تداول سريع، IBKR / MT5 / Alpaca (أسهم · ETF · عملات مشفّرة)؛ Telegram وبريد وDiscord وWebhook وغيرها.
 - **المنصة** — Docker Compose، Postgres، Redis، OAuth، متعدد المستخدمين، أرصدة/عضوية/USDT.
 
 ## البنية
@@ -199,7 +199,7 @@ flowchart LR
     subgraph EXT[خارجي]
         LLM[LLM]
         EXCH[بورصة]
-        BROKER[IBKR / MT5]
+        BROKER[IBKR / MT5 / Alpaca]
     end
 
     U --> WEB --> NG --> API
@@ -243,7 +243,7 @@ flowchart LR
 
 **هل يمكن الاستضافة الذاتية حقًا؟** نعم، عبر Docker Compose على بنيتك.
 
-**هل للعملات المشفّرة فقط؟** لا. يدعم IBKR (أسهم أمريكية)، MT5 (فوركس)، وPolymarket للبحث.
+**هل للعملات المشفّرة فقط؟** لا. يدعم IBKR / Alpaca (أسهم · ETF · عملات مشفّرة)، MT5 (فوركس)، وPolymarket للبحث.
 
 **هل يمكن كتابة استراتيجيات بايثون؟** نعم، `IndicatorStrategy` و`ScriptStrategy`.
 

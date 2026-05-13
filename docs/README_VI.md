@@ -46,7 +46,7 @@
 
   <p style="margin-top: 1.45rem; margin-bottom: 10px;">
     <a href="../LICENSE"><img src="https://img.shields.io/badge/License-Apache%202.0-blue.svg?style=flat-square&logo=apache" alt="License"></a>
-    <img src="https://img.shields.io/badge/Version-3.0.3-orange?style=flat-square" alt="Version">
+    <img src="https://img.shields.io/badge/Version-3.0.5-orange?style=flat-square" alt="Version">
     <img src="https://img.shields.io/badge/Python-3.10%2B%20%7C%20Docker%203.12-3776AB?style=flat-square&logo=python&logoColor=white" alt="Python">
     <img src="https://img.shields.io/badge/Docker-Compose-2496ED?style=flat-square&logo=docker&logoColor=white" alt="Docker">
     <img src="https://img.shields.io/github/stars/brokermr810/QuantDinger?style=flat-square&logo=github" alt="Stars">
@@ -61,7 +61,7 @@
 
 ---
 
-> QuantDinger là nền tảng định lượng **tự lưu trữ, ưu tiên cục bộ**, gom **nghiên cứu hỗ trợ AI**, **chiến lược Python gốc**, **kiểm thử lùi** và **giao dịch thực** (tiền mã hóa, cổ phiếu Mỹ qua IBKR, FX qua MT5) trong **một sản phẩm**.
+> QuantDinger là nền tảng định lượng **tự lưu trữ, ưu tiên cục bộ**, gom **nghiên cứu hỗ trợ AI**, **chiến lược Python gốc**, **kiểm thử lùi** và **giao dịch thực** (tiền mã hóa, cổ phiếu Mỹ qua IBKR, FX qua MT5, cổ phiếu Mỹ / ETF / tiền mã hóa qua Alpaca) trong **một sản phẩm**.
 
 <div align="center">
   <img src="screenshots/architecture.png" alt="Kiến trúc QuantDinger" width="960">
@@ -122,7 +122,7 @@ Dành cho **Cursor / Claude Code / Codex**: **Model Context Protocol (MCP)** và
 
 ## Tổng quan sản phẩm
 
-Môi trường thống nhất **AI + chiến lược Python + kiểm thử lùi + giao dịch thực**, có thể tự host. Thông tin xác thực nằm trong **PostgreSQL** và **`.env`**. Sàn tiền mã hóa, IBKR, MT5, LLM kết nối qua biến môi trường.
+Môi trường thống nhất **AI + chiến lược Python + kiểm thử lùi + giao dịch thực**, có thể tự host. Thông tin xác thực nằm trong **PostgreSQL** và **`.env`**. Sàn tiền mã hóa, IBKR, MT5, Alpaca, LLM kết nối qua biến môi trường.
 
 ## Tour hình ảnh
 
@@ -150,7 +150,7 @@ Môi trường thống nhất **AI + chiến lược Python + kiểm thử lùi 
 - **Nghiên cứu &amp; AI** — Phân tích đa LLM, danh mục theo dõi, lịch sử; NL→mã; quy trình Polymarket; tích hợp **Agent / MCP**.
 - **Xây dựng** — `IndicatorStrategy` và `ScriptStrategy` (`on_bar`); giao diện nến chuyên nghiệp.
 - **Xác minh** — Kiểm thử lùi phía máy chủ, đường vốn.
-- **Vận hành** — Thực thi tiền mã hóa, giao dịch nhanh, IBKR / MT5; Telegram, email, Discord, Webhook, v.v.
+- **Vận hành** — Thực thi tiền mã hóa, giao dịch nhanh, IBKR / MT5 / Alpaca (cổ Mỹ · ETF · tiền mã hóa); Telegram, email, Discord, Webhook, v.v.
 - **Nền tảng** — Docker Compose, Postgres, Redis, OAuth, đa người dùng, tín dụng / thành viên / USDT.
 
 ## Kiến trúc
@@ -179,7 +179,7 @@ flowchart LR
     subgraph EXT[Bên ngoài]
         LLM[LLM]
         EXCH[Sàn]
-        BROKER[IBKR / MT5]
+        BROKER[IBKR / MT5 / Alpaca]
     end
 
     U --> WEB --> NG --> API
@@ -221,7 +221,7 @@ Khác: [multi-user-setup.md](multi-user-setup.md) · [IBKR](IBKR_TRADING_GUIDE_E
 
 **Có thật sự tự host được không?** Có, triển khai bằng Docker Compose trên hạ tầng của bạn.
 
-**Chỉ tiền mã hóa?** Không. Hỗ trợ IBKR (cổ Mỹ), MT5 (FX), và Polymarket cho nghiên cứu.
+**Chỉ tiền mã hóa?** Không. Hỗ trợ IBKR / Alpaca (cổ Mỹ · ETF · tiền mã hóa), MT5 (FX), và Polymarket cho nghiên cứu.
 
 **Viết chiến lược bằng Python được không?** Có, hỗ trợ `IndicatorStrategy` và `ScriptStrategy`.
 

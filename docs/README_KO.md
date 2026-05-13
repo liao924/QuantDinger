@@ -46,7 +46,7 @@
 
   <p style="margin-top: 1.45rem; margin-bottom: 10px;">
     <a href="../LICENSE"><img src="https://img.shields.io/badge/License-Apache%202.0-blue.svg?style=flat-square&logo=apache" alt="License"></a>
-    <img src="https://img.shields.io/badge/Version-3.0.3-orange?style=flat-square" alt="Version">
+    <img src="https://img.shields.io/badge/Version-3.0.5-orange?style=flat-square" alt="Version">
     <img src="https://img.shields.io/badge/Python-3.10%2B%20%7C%20Docker%203.12-3776AB?style=flat-square&logo=python&logoColor=white" alt="Python">
     <img src="https://img.shields.io/badge/Docker-Compose-2496ED?style=flat-square&logo=docker&logoColor=white" alt="Docker">
     <img src="https://img.shields.io/github/stars/brokermr810/QuantDinger?style=flat-square&logo=github" alt="Stars">
@@ -61,7 +61,7 @@
 
 ---
 
-> QuantDinger는 **셀프호스트·로컬 우선** 퀀트 플랫폼입니다. **AI 보조 리서치**, **Python 네이티브 전략**, **백테스트**, **라이브 거래**(암호화폐, IBKR 미국 주식, MT5 FX)를 **하나의 제품**으로 묶습니다.
+> QuantDinger는 **셀프호스트·로컬 우선** 퀀트 플랫폼입니다. **AI 보조 리서치**, **Python 네이티브 전략**, **백테스트**, **라이브 거래**(암호화폐, IBKR 미국 주식, MT5 FX, Alpaca 미국 주식 / ETF / 암호화폐)를 **하나의 제품**으로 묶습니다.
 
 <div align="center">
   <img src="screenshots/architecture.png" alt="QuantDinger 아키텍처" width="960">
@@ -122,7 +122,7 @@ Git for Windows Bash에서는 위 macOS/Linux 한 줄 명령을 그대로 사용
 
 ## 제품 개요
 
-셀프호스트 가능한 **AI + Python 전략 + 백테스트 + 라이브** 통합 환경입니다. 자격 증명은 **PostgreSQL**과 **`.env`**로 관리합니다. 암호화폐 거래소, IBKR, MT5, LLM은 환경 변수로 연결합니다.
+셀프호스트 가능한 **AI + Python 전략 + 백테스트 + 라이브** 통합 환경입니다. 자격 증명은 **PostgreSQL**과 **`.env`**로 관리합니다. 암호화폐 거래소, IBKR, MT5, Alpaca, LLM은 환경 변수로 연결합니다.
 
 ## 비주얼 투어
 
@@ -150,7 +150,7 @@ Git for Windows Bash에서는 위 macOS/Linux 한 줄 명령을 그대로 사용
 - **리서치 & AI** — 멀티 LLM 분석, 관심목록, 기록; NL→코드; Polymarket 리서치 플로; **Agent / MCP** 연동.
 - **구축** — `IndicatorStrategy`와 `ScriptStrategy`(`on_bar`); 프로 K라인 UI.
 - **검증** — 서버 사이드 백테스트, 에퀴티 커브.
-- **운영** — 암호화폐 실행, 퀵 트레이드, IBKR / MT5; Telegram, 이메일, Discord, Webhook 등.
+- **운영** — 암호화폐 실행, 퀵 트레이드, IBKR / MT5 / Alpaca(미국 주식 · ETF · 암호화폐); Telegram, 이메일, Discord, Webhook 등.
 - **플랫폼** — Docker Compose, Postgres, Redis, OAuth, 멀티유저, 크레딧·멤버십·USDT 과금 스위치.
 
 ## 아키텍처
@@ -179,7 +179,7 @@ flowchart LR
     subgraph EXT[외부]
         LLM[LLM]
         EXCH[거래소]
-        BROKER[IBKR / MT5]
+        BROKER[IBKR / MT5 / Alpaca]
     end
 
     U --> WEB --> NG --> API
@@ -221,7 +221,7 @@ AI 기능은 `env.example`의 **AI / LLM** 섹션을 `.env`에 반영한 뒤 bac
 
 **정말 셀프호스트 가능한가요?** 네. Docker Compose로 자체 인프라에 배포합니다.
 
-**암호화폐만인가요?** 아니요. IBKR(미국 주식), MT5(FX), Polymarket 리서치도 지원합니다.
+**암호화폐만인가요?** 아니요. IBKR / Alpaca(미국 주식 · ETF · 암호화폐), MT5(FX), Polymarket 리서치도 지원합니다.
 
 **Python으로 전략을 쓸 수 있나요?** 네. `IndicatorStrategy`와 `ScriptStrategy`를 지원합니다.
 
