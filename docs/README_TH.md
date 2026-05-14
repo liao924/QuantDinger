@@ -203,7 +203,7 @@ flowchart LR
    - **ทางเลือก (ไม่ต้อง clone repo)**: ดึงอิมเมจ backend + frontend สำเร็จรูปแบบหลายสถาปัตยกรรม (amd64/arm64) จาก GHCR โดยตรง:
      ```bash
      curl -O https://raw.githubusercontent.com/brokermr810/QuantDinger/main/docker-compose.ghcr.yml
-     curl -o .env https://raw.githubusercontent.com/brokermr810/QuantDinger/main/backend_api_python/env.example
+     curl -o backend.env https://raw.githubusercontent.com/brokermr810/QuantDinger/main/backend_api_python/env.example
      docker compose -f docker-compose.ghcr.yml up -d
      ```
      อิมเมจเริ่มต้น: `ghcr.io/brokermr810/quantdinger-{backend,frontend}:latest` ตรึงเวอร์ชันด้วย `IMAGE_TAG=v3.0.6` ใน `.env` ที่อยู่ในเครื่อง

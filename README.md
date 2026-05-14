@@ -387,11 +387,11 @@ If you do not want to clone the repository, the GHCR variant pulls prebuilt mult
 
 ```bash
 curl -O https://raw.githubusercontent.com/brokermr810/QuantDinger/main/docker-compose.ghcr.yml
-curl -o .env https://raw.githubusercontent.com/brokermr810/QuantDinger/main/backend_api_python/env.example
+curl -o backend.env https://raw.githubusercontent.com/brokermr810/QuantDinger/main/backend_api_python/env.example
 docker compose -f docker-compose.ghcr.yml up -d
 ```
 
-The backend entrypoint auto-generates a random `SECRET_KEY` on first start and applies the schema (`migrations/init.sql`) idempotently. Edit `.env` for persistent overrides (API keys, OAuth, broker credentials). Pin a version by appending `IMAGE_TAG=v3.0.6` to the same `.env`:
+The backend entrypoint auto-generates a random `SECRET_KEY` on first start and applies the schema (`migrations/init.sql`) idempotently. Edit `backend.env` for persistent overrides (API keys, OAuth, broker credentials). Compose orchestration knobs go in a separate `.env` (optional) — e.g. pin a version:
 
 ```env
 IMAGE_TAG=v3.0.6

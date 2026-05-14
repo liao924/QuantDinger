@@ -203,7 +203,7 @@ flowchart LR
    - **代替（リポジトリ不要）**：プリビルド多架構（amd64/arm64）の backend + frontend を GHCR から直接プルする場合：
      ```bash
      curl -O https://raw.githubusercontent.com/brokermr810/QuantDinger/main/docker-compose.ghcr.yml
-     curl -o .env https://raw.githubusercontent.com/brokermr810/QuantDinger/main/backend_api_python/env.example
+     curl -o backend.env https://raw.githubusercontent.com/brokermr810/QuantDinger/main/backend_api_python/env.example
      docker compose -f docker-compose.ghcr.yml up -d
      ```
      デフォルトイメージは `ghcr.io/brokermr810/quantdinger-{backend,frontend}:latest`。バージョン固定はローカル `.env` で `IMAGE_TAG=v3.0.6`。

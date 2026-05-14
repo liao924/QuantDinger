@@ -389,11 +389,11 @@ docker-compose up -d --build
 
 ```bash
 curl -O https://raw.githubusercontent.com/brokermr810/QuantDinger/main/docker-compose.ghcr.yml
-curl -o .env https://raw.githubusercontent.com/brokermr810/QuantDinger/main/backend_api_python/env.example
+curl -o backend.env https://raw.githubusercontent.com/brokermr810/QuantDinger/main/backend_api_python/env.example
 docker compose -f docker-compose.ghcr.yml up -d
 ```
 
-后端 entrypoint 会在首次启动时自动生成随机 `SECRET_KEY` 并幂等地应用 `migrations/init.sql`。编辑 `.env` 用于持久化覆盖（API 密钥、OAuth、券商凭据等）。生产环境建议在同一份 `.env` 末尾追加 pin 版本：
+后端 entrypoint 会在首次启动时自动生成随机 `SECRET_KEY` 并幂等地应用 `migrations/init.sql`。编辑 `backend.env` 用于持久化覆盖（API 密钥、OAuth、券商凭据等）。编排参数（pin 版本、换镜像源等）放在独立的 `.env`（可选）：
 
 ```env
 IMAGE_TAG=v3.0.6

@@ -1,32 +1,27 @@
 # QuantDinger Docker Compose - GHCR prebuilt images (zero-repo deploy)
 #
 # Pulls both backend and frontend images from GitHub Container Registry. The
-# repository does NOT need to be cloned — only this file (and an optional
-# `.env` for runtime overrides) is required.
+# repository does NOT need to be cloned — only this file (plus a backend.env
+# for runtime config) is required.
 #
 # Minimal install (Linux / macOS):
 #
 #   curl -O https://raw.githubusercontent.com/brokermr810/QuantDinger/main/docker-compose.ghcr.yml
-#   # optional: download the env template and edit it for API keys / OAuth / brokers
-#   curl -o .env https://raw.githubusercontent.com/brokermr810/QuantDinger/main/backend_api_python/env.example
+#   curl -o backend.env https://raw.githubusercontent.com/brokermr810/QuantDinger/main/backend_api_python/env.example
 #   docker compose -f docker-compose.ghcr.yml up -d
 #   # open http://localhost:8888  (login: quantdinger / 123456)
 #
-# Without a `.env` the backend entrypoint will materialize a fresh config inside
-# the container and auto-generate SECRET_KEY on first start, so nothing is
-# required for a smoke test. Provide your own `.env` once you need persistent
-# overrides (API keys, ADMIN_USER, broker creds, etc.).
-#
-# A single root `.env` serves both purposes here:
-#   - docker compose reads it for ${VAR} substitution (IMAGE_TAG, ports, ...)
-#   - the backend container bind-mounts it as /app/.env (SECRET_KEY, API keys, ...)
-# Unreferenced backend vars are simply ignored by compose.
+# Two-file separation of concerns:
+#   - backend.env   — backend runtime config (SECRET_KEY, API keys, broker creds, ...);
+#                     bind-mounted into the backend container as /app/.env
+#   - .env (optional) — docker compose orchestration knobs (IMAGE_TAG, ports, mirrors);
+#                       read by `docker compose` itself for ${VAR} substitution
 #
 # Database schema is bootstrapped automatically: the backend re-applies
 # `migrations/init.sql` idempotently on every start, so no host-side SQL
 # mount is needed (unlike docker-compose.yml).
 #
-# Override knobs (write into the same root `.env`):
+# Orchestration override knobs (project-root .env, all optional):
 #   IMAGE_TAG       - backend & frontend tag (default: latest)
 #   BACKEND_IMAGE   - backend image path  (default: ghcr.io/brokermr810/quantdinger-backend)
 #   FRONTEND_IMAGE  - frontend image path (default: ghcr.io/brokermr810/quantdinger-frontend)
@@ -89,12 +84,12 @@ services:
     volumes:
       - backend_logs:/app/logs
       - backend_data:/app/data
-      # Runtime config. The project-root .env (also used by compose itself for
-      # ${VAR} substitution) is bind-mounted as /app/.env. If the host file is
-      # missing, docker creates a directory at the mount target instead of a
-      # file and shadows /app/.env — comment this line out for true config-less
-      # smoke tests, or just `touch .env` before `up -d`.
-      - ./.env:/app/.env
+      # Backend runtime config. Must exist as a *file* on the host — if missing,
+      # docker silently creates a directory at the mount target and shadows
+      # /app/.env. The entrypoint will auto-generate SECRET_KEY on first start
+      # and write it back through the bind mount, so the host file gets the
+      # generated key persistently.
+      - ./backend.env:/app/.env
     environment:
       - PYTHON_API_HOST=0.0.0.0
       - PYTHON_API_PORT=5000

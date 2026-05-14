@@ -203,7 +203,7 @@ flowchart LR
    - **대안 (저장소 불필요)**: backend + frontend 모두 GHCR의 프리빌드 멀티 아키텍처(amd64/arm64) 이미지를 직접 풀:
      ```bash
      curl -O https://raw.githubusercontent.com/brokermr810/QuantDinger/main/docker-compose.ghcr.yml
-     curl -o .env https://raw.githubusercontent.com/brokermr810/QuantDinger/main/backend_api_python/env.example
+     curl -o backend.env https://raw.githubusercontent.com/brokermr810/QuantDinger/main/backend_api_python/env.example
      docker compose -f docker-compose.ghcr.yml up -d
      ```
      기본 이미지: `ghcr.io/brokermr810/quantdinger-{backend,frontend}:latest`. 버전 고정은 로컬 `.env`에 `IMAGE_TAG=v3.0.6`.

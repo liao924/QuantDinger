@@ -225,7 +225,7 @@ flowchart LR
    - **بديل (بدون استنساخ المستودع)**: اسحب صور backend + frontend الجاهزة المتعددة المعماريات (amd64/arm64) من GHCR مباشرة:
      ```bash
      curl -O https://raw.githubusercontent.com/brokermr810/QuantDinger/main/docker-compose.ghcr.yml
-     curl -o .env https://raw.githubusercontent.com/brokermr810/QuantDinger/main/backend_api_python/env.example
+     curl -o backend.env https://raw.githubusercontent.com/brokermr810/QuantDinger/main/backend_api_python/env.example
      docker compose -f docker-compose.ghcr.yml up -d
      ```
      الصور الافتراضية: `ghcr.io/brokermr810/quantdinger-{backend,frontend}:latest`. لتثبيت إصدار محدد اضبط `IMAGE_TAG=v3.0.6` في ملف `.env` محلي.
