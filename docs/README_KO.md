@@ -200,6 +200,13 @@ flowchart LR
 1. 클론 후 `cp backend_api_python/env.example backend_api_python/.env`
 2. **`SECRET_KEY` 필수 설정**(플레이스홀더면 백엔드가 시작되지 않음). Linux/macOS: `./scripts/generate-secret-key.sh`
 3. `docker-compose up -d --build`
+   - **대안 (저장소 불필요)**: backend + frontend 모두 GHCR의 프리빌드 멀티 아키텍처(amd64/arm64) 이미지를 직접 풀:
+     ```bash
+     curl -O https://raw.githubusercontent.com/brokermr810/QuantDinger/main/docker-compose.ghcr.yml
+     curl -o .env https://raw.githubusercontent.com/brokermr810/QuantDinger/main/backend_api_python/env.example
+     docker compose -f docker-compose.ghcr.yml up -d
+     ```
+     기본 이미지: `ghcr.io/brokermr810/quantdinger-{backend,frontend}:latest`. 버전 고정은 로컬 `.env`에 `IMAGE_TAG=v3.0.6`.
 4. **Web:** `http://localhost:8888` · **API 헬스:** `http://localhost:5000/api/health`
 5. 프로덕션 전 기본 관리자 비밀번호 변경. `backend_api_python/.env`의 **`FRONTEND_URL`**을 실제 URL에 맞추세요.
 

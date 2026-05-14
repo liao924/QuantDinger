@@ -222,6 +222,13 @@ flowchart LR
 1. استنسخ المستودع ثم `cp backend_api_python/env.example backend_api_python/.env`
 2. **يجب تعيين `SECRET_KEY`** (القيمة الافتراضية تمنع تشغيل الخلفية). Linux/macOS: `./scripts/generate-secret-key.sh`
 3. `docker-compose up -d --build`
+   - **بديل (بدون استنساخ المستودع)**: اسحب صور backend + frontend الجاهزة المتعددة المعماريات (amd64/arm64) من GHCR مباشرة:
+     ```bash
+     curl -O https://raw.githubusercontent.com/brokermr810/QuantDinger/main/docker-compose.ghcr.yml
+     curl -o .env https://raw.githubusercontent.com/brokermr810/QuantDinger/main/backend_api_python/env.example
+     docker compose -f docker-compose.ghcr.yml up -d
+     ```
+     الصور الافتراضية: `ghcr.io/brokermr810/quantdinger-{backend,frontend}:latest`. لتثبيت إصدار محدد اضبط `IMAGE_TAG=v3.0.6` في ملف `.env` محلي.
 4. **الويب:** `http://localhost:8888` · **صحة API:** `http://localhost:5000/api/health`
 5. غيّر كلمة مرور المسؤول الافتراضية قبل الإنتاج. اضبط **`FRONTEND_URL`** في `backend_api_python/.env` على عنوانك الفعلي.
 

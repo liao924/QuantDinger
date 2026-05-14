@@ -74,6 +74,20 @@ jobs:
           # - Dependencies are available and importable
           # - Core module structure is intact
 
+  compose-check:
+    name: Docker Compose Validation
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Validate docker-compose.yml (build mode)
+        run: docker compose -f docker-compose.yml config -q
+
+      - name: Validate docker-compose.ghcr.yml (GHCR mode)
+        run: docker compose -f docker-compose.ghcr.yml config -q
+
   frontend-check:
     name: Frontend Build Check
     runs-on: ubuntu-latest
