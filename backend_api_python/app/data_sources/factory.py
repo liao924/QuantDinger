@@ -38,16 +38,41 @@ class DataSourceFactory:
     
     _sources: Dict[str, BaseDataSource] = {}
     
+    # Markets that pass through normalize_market unchanged.
+    _CANONICAL_MARKETS = ("Crypto", "Forex", "Futures", "USStock", "CNStock", "HKStock", "MOEX")
+
     @classmethod
     def normalize_market(cls, market: str) -> str:
-        """统一市场枚举大小写与别名，供路由与数据源入口使用。"""
+        """
+        Normalize a market category string.
+
+        IMPORTANT: empty / unknown input used to silently degrade to "Crypto",
+        which made stock symbols like TSLA quietly route to CCXT/Coinbase. We
+        keep that fallback for backward compatibility (some callers still rely
+        on it) but emit a loud WARNING so the misroute is no longer invisible.
+        Always pass a real market category from the caller.
+        """
         if not market:
+            logger.warning(
+                "DataSourceFactory.normalize_market(): empty market category — "
+                "falling back to 'Crypto'. Caller MUST supply an explicit market "
+                "(USStock / Forex / Futures / Crypto / CNStock / HKStock / MOEX). "
+                "This fallback is deprecated and will become a hard error.",
+                stack_info=False,
+            )
             return "Crypto"
         raw = str(market).strip()
-        if raw in ("Crypto", "Forex", "Futures", "USStock", "CNStock", "HKStock", "MOEX"):
+        if raw in cls._CANONICAL_MARKETS:
             return raw
         key = raw.lower().replace(" ", "").replace("-", "_")
-        return _MARKET_ALIASES.get(key, raw)
+        if key in _MARKET_ALIASES:
+            return _MARKET_ALIASES[key]
+        logger.warning(
+            "DataSourceFactory.normalize_market(): unknown market %r — "
+            "passing through as-is; downstream get_source() will likely fail.",
+            raw,
+        )
+        return raw
 
     @classmethod
     def get_source(cls, market: str) -> BaseDataSource:
@@ -74,13 +99,22 @@ class DataSourceFactory:
         In the localized Python backend we primarily use `get_source("Crypto")`.
         """
         key = (name or "").strip().lower()
-        if key in ("crypto", "binance", "okx", "bybit", "bitget", "kucoin", "gate", "mexc", "kraken", "coinbase"):
+        if key in ("crypto", "binance", "okx", "bybit", "bitget", "kucoin", "gate", "mexc", "kraken", "coinbase", "alpaca_crypto"):
             return cls.get_source("Crypto")
         if key in ("futures",):
             return cls.get_source("Futures")
-        if key in ("forex", "fx"):
+        if key in ("forex", "fx", "mt5"):
             return cls.get_source("Forex")
-        # Default to Crypto for safety (most callers want a ticker for crypto pairs).
+        if key in ("usstock", "us_stocks", "stock", "stocks", "ibkr", "alpaca"):
+            return cls.get_source("USStock")
+        # Unknown alias — log and default to Crypto (legacy behavior). Callers
+        # should migrate to the explicit `get_source(market)` API.
+        logger.warning(
+            "DataSourceFactory.get_data_source(%r): unknown alias — falling back "
+            "to Crypto. Migrate caller to get_source(market) with an explicit "
+            "market category.",
+            name,
+        )
         return cls.get_source("Crypto")
     
     @classmethod

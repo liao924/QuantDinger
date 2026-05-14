@@ -11,6 +11,15 @@ from app.utils.db import get_db_connection
 
 logger = get_logger(__name__)
 
+# Note: broker / market / market_type / trade_direction / bot_type compatibility
+# rules used to live in this file as scattered if-blocks plus a local
+# _enforce_long_only_for_stock_brokers helper. They have been moved into
+# `app.services.broker_market_policy.validate_strategy_config`, which is the
+# single source of truth shared by create/update/batch CRUD, the live worker,
+# and the frontend (via GET /api/policy/broker-market). Do not re-introduce
+# inline broker checks here.
+
+
 class StrategyService:
     """Strategy service."""
     
@@ -421,6 +430,50 @@ class StrategyService:
                         return {
                             'success': False,
                             'message': f'IBKR connection failed: {error_msg}',
+                            'data': {'exchange': safe_cfg}
+                        }
+
+                # Handle Alpaca (US Stocks + Crypto via REST, no local terminal needed)
+                if exchange_id == 'alpaca':
+                    market_category_al = str(
+                        resolved.get("market_category") or exchange_config.get("market_category") or ""
+                    ).strip()
+                    if market_category_al and market_category_al not in ("USStock", "Crypto"):
+                        return {
+                            "success": False,
+                            "message": (
+                                f"Alpaca supports US stocks and Crypto only (market_category=USStock|Crypto), "
+                                f"but got '{market_category_al}'."
+                            ),
+                            "data": {"exchange": safe_cfg},
+                        }
+                    try:
+                        from app.services.live_trading.factory import create_alpaca_client
+                        alpaca_client = create_alpaca_client(resolved)
+                        if alpaca_client and alpaca_client.connected:
+                            account_summary = None
+                            try:
+                                account_summary = alpaca_client.get_account_summary()
+                            except Exception:
+                                pass
+                            return {
+                                'success': True,
+                                'message': 'Alpaca connection successful',
+                                'data': {
+                                    'exchange': safe_cfg,
+                                    'account': account_summary
+                                }
+                            }
+                        else:
+                            return {
+                                'success': False,
+                                'message': 'Failed to connect to Alpaca. Please check API key/secret and paper/live mode.',
+                                'data': {'exchange': safe_cfg}
+                            }
+                    except Exception as e:
+                        return {
+                            'success': False,
+                            'message': f'Alpaca connection failed: {e}',
                             'data': {'exchange': safe_cfg}
                         }
 
@@ -951,18 +1004,20 @@ class StrategyService:
             user_id=int(user_id or 1),
         )
 
-        # Validate MT5 can only be used for Forex trading
+        # Validate broker / market / market_type / direction / bot_type as a
+        # single unit through the centralized policy (broker_market_policy.py).
+        # That module is the single source of truth — adding a new broker or
+        # tightening a rule should only need a change in one place.
+        from app.services.broker_market_policy import validate_strategy_config
         exchange_id = (resolved_ex_cfg.get('exchange_id') or '').strip().lower() if isinstance(resolved_ex_cfg, dict) else ''
-        if exchange_id == 'mt5' and market_category != 'Forex':
-            raise ValueError(
-                f"MT5 can only be used for Forex trading, but market_category is '{market_category}'. "
-                f"MT5 does not support Crypto or Stock trading. Please use MT5 only with Forex market."
-            )
-        if exchange_id == 'ibkr' and market_category != 'USStock':
-            raise ValueError(
-                f"IBKR can only be used for US stock trading, but market_category is '{market_category}'. "
-                f"Please set market category to US Stock when using Interactive Brokers."
-            )
+        validate_strategy_config(
+            exchange_id=exchange_id,
+            market_category=market_category,
+            market_type=(trading_config or {}).get('market_type'),
+            trade_direction=(trading_config or {}).get('trade_direction'),
+            bot_type=(trading_config or {}).get('bot_type'),
+            require_exchange=(execution_mode == 'live'),
+        )
         if market_category == 'MOEX':
             raise ValueError(
                 "MOEX (Moscow Exchange) is supported for analysis and backtesting only. "
@@ -1068,24 +1123,27 @@ class StrategyService:
         if not base_name:
             raise ValueError("strategy_name is required")
         
-        # Validate MT5 can only be used for Forex trading
+        # Validate broker / market combination via centralized policy.
+        # Each per-symbol create_strategy() call below will re-validate, but
+        # checking once up front fails the whole batch fast on a mismatch.
         market_category = payload.get('market_category') or 'Crypto'
         exchange_config = payload.get('exchange_config') or {}
+        batch_trading_config = payload.get('trading_config') if isinstance(payload.get('trading_config'), dict) else {}
+        batch_execution_mode = (payload.get('execution_mode') or 'signal').strip().lower()
         from app.services.exchange_execution import resolve_exchange_config as _resolve_ex
+        from app.services.broker_market_policy import validate_strategy_config as _validate_policy
 
         uid_bc = int(payload.get('user_id') or 1)
         _resolved_bc = _resolve_ex(exchange_config if isinstance(exchange_config, dict) else {}, user_id=uid_bc)
         exchange_id = (_resolved_bc.get('exchange_id') or '').strip().lower() if isinstance(_resolved_bc, dict) else ''
-        if exchange_id == 'mt5' and market_category != 'Forex':
-            raise ValueError(
-                f"MT5 can only be used for Forex trading, but market_category is '{market_category}'. "
-                f"MT5 does not support Crypto or Stock trading. Please use MT5 only with Forex market."
-            )
-        if exchange_id == 'ibkr' and market_category != 'USStock':
-            raise ValueError(
-                f"IBKR can only be used for US stock trading, but market_category is '{market_category}'. "
-                f"Please set market category to US Stock when using Interactive Brokers."
-            )
+        _validate_policy(
+            exchange_id=exchange_id,
+            market_category=market_category,
+            market_type=batch_trading_config.get('market_type'),
+            trade_direction=batch_trading_config.get('trade_direction'),
+            bot_type=batch_trading_config.get('bot_type'),
+            require_exchange=(batch_execution_mode == 'live'),
+        )
         if market_category == 'MOEX':
             raise ValueError(
                 "MOEX (Moscow Exchange) is supported for analysis and backtesting only. "
@@ -1284,14 +1342,18 @@ class StrategyService:
             user_id=int(user_id or 1),
         )
         ex_id = (_merged_ex.get('exchange_id') or '').strip().lower() if isinstance(_merged_ex, dict) else ''
-        if ex_id == 'mt5' and market_category != 'Forex':
-            raise ValueError(
-                f"MT5 can only be used for Forex trading, but market_category is '{market_category}'."
-            )
-        if ex_id == 'ibkr' and market_category != 'USStock':
-            raise ValueError(
-                f"IBKR can only be used for US stock trading, but market_category is '{market_category}'."
-            )
+        # Resolve effective execution_mode (payload may override existing).
+        _upd_exec_mode = ((payload.get('execution_mode') if payload.get('execution_mode') is not None
+                           else existing.get('execution_mode')) or 'signal').strip().lower()
+        from app.services.broker_market_policy import validate_strategy_config as _validate_policy_upd
+        _validate_policy_upd(
+            exchange_id=ex_id,
+            market_category=market_category,
+            market_type=(trading_config or {}).get('market_type') or existing.get('market_type'),
+            trade_direction=(trading_config or {}).get('trade_direction'),
+            bot_type=(trading_config or {}).get('bot_type'),
+            require_exchange=(_upd_exec_mode == 'live'),
+        )
         if market_category == 'MOEX':
             raise ValueError(
                 "MOEX (Moscow Exchange) is supported for analysis and backtesting only. "

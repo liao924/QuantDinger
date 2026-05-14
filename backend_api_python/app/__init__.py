@@ -277,7 +277,46 @@ def create_app(config_name='default'):
         ).split(",")
         if o.strip()
     ]
-    CORS(app, origins=_cors_origins)
+
+    # ------------------------------------------------------------------
+    # Capacitor / Cordova / Ionic mobile app origins.
+    #
+    # When the H5 frontend is packaged as a native app via Capacitor, the
+    # WebView loads pages from a synthetic origin (NOT from your real
+    # domain), and every API request to the production backend is treated
+    # as cross-origin by the WebView. The exact origin depends on the
+    # Capacitor server config:
+    #   - Android (capacitor 6, androidScheme="https") → https://localhost
+    #   - Android (capacitor 5 or scheme="http")      → http://localhost
+    #   - iOS (capacitor 6, iosScheme="https")        → capacitor://localhost
+    #   - iOS legacy (ionic://)                       → ionic://localhost
+    #   - Cordova / file:// loaded apps               → null  (Origin: null)
+    #
+    # We always allow these so a packaged QuantDinger mobile app can call
+    # the backend without each user editing FRONTEND_URL. They are *fixed
+    # synthetic origins controlled by the OS / Capacitor*, not user input,
+    # so this does not widen exposure to real third-party sites.
+    _capacitor_origins = [
+        "https://localhost",        # Android, Capacitor 6, androidScheme=https
+        "http://localhost",         # Android legacy
+        "capacitor://localhost",    # iOS, Capacitor 6, iosScheme=capacitor
+        "ionic://localhost",        # iOS legacy / Ionic
+        "https://localhost:*",      # rare custom port
+        "http://localhost:*",
+    ]
+    for origin in _capacitor_origins:
+        if origin not in _cors_origins:
+            _cors_origins.append(origin)
+
+    # send_wildcard=False + supports_credentials=False is the safe default
+    # for token-in-Authorization-header auth (which is what the mobile app
+    # uses; see api/index.js → `Authorization: Bearer ${token}`).
+    CORS(
+        app,
+        origins=_cors_origins,
+        supports_credentials=False,
+        send_wildcard=False,
+    )
     logger.info(f"CORS allowed origins: {_cors_origins}")
 
     setup_logger()
