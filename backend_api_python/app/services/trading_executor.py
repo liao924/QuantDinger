@@ -887,6 +887,13 @@ class TradingExecutor:
             is_bot_mode = strategy_mode == 'bot'
             notification_config = strategy.get('notification_config') or {}
             strategy_name = strategy.get('strategy_name') or f"strategy_{int(strategy_id)}"
+            # Strategy owner: used to scope cross-feature notifications (e.g. portfolio
+            # linkage) to the user who actually runs this strategy. Without it, a signal
+            # from user A's strategy would leak to every user holding the same symbol.
+            try:
+                strategy_user_id = int(strategy.get('user_id') or 0) or None
+            except (TypeError, ValueError):
+                strategy_user_id = None
             symbol = trading_config.get('symbol', '')
             timeframe = trading_config.get('timeframe', '1H')
             
@@ -1538,15 +1545,26 @@ class TradingExecutor:
                                     "signal",
                                     f"Signal submitted: {signal_type} @ {float(execute_price or 0):.6f}{self._signal_reason_log_suffix(selected)}",
                                 )
-                                # Notify portfolio positions linked to this symbol
+                                # Notify portfolio positions linked to this symbol.
+                                # IMPORTANT: scope to the strategy owner only. Without
+                                # `user_id`, the callee would fan out to every user
+                                # holding the same symbol and leak the strategy name /
+                                # signal details across tenants.
                                 try:
                                     from app.services.portfolio_monitor import notify_strategy_signal_for_positions
-                                    notify_strategy_signal_for_positions(
-                                        market=market_type or 'Crypto',
-                                        symbol=symbol,
-                                        signal_type=signal_type,
-                                        signal_detail=f"Strategy: {strategy_name}\nSignal: {signal_type}\nPrice: {execute_price:.4f}"
-                                    )
+                                    if strategy_user_id:
+                                        notify_strategy_signal_for_positions(
+                                            market=market_type or 'Crypto',
+                                            symbol=symbol,
+                                            signal_type=signal_type,
+                                            signal_detail=f"Strategy: {strategy_name}\nSignal: {signal_type}\nPrice: {execute_price:.4f}",
+                                            user_id=strategy_user_id,
+                                        )
+                                    else:
+                                        logger.warning(
+                                            f"Strategy {strategy_id} missing owner user_id; "
+                                            f"skipping portfolio linkage notification to avoid cross-user broadcast"
+                                        )
                                 except Exception as link_e:
                                     logger.warning(f"Strategy signal linkage notification failed: {link_e}")
                             else:
@@ -1646,8 +1664,8 @@ class TradingExecutor:
             with get_db_connection() as db:
                 cursor = db.cursor()
                 query = """
-                    SELECT 
-                        id, strategy_name, strategy_type, status,
+                    SELECT
+                        id, user_id, strategy_name, strategy_type, status,
                         initial_capital, leverage, decide_interval,
                         execution_mode, notification_config,
                         indicator_config, exchange_config, trading_config, ai_model_config,

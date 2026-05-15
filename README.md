@@ -46,7 +46,7 @@
 
   <p style="margin-top: 1.45rem; margin-bottom: 10px;">
     <a href="LICENSE"><img src="https://img.shields.io/badge/License-Apache%202.0-blue.svg?style=flat-square&logo=apache" alt="License"></a>
-    <img src="https://img.shields.io/badge/Version-3.0.5-orange?style=flat-square" alt="Version">
+    <img src="https://img.shields.io/badge/Version-3.0.7-orange?style=flat-square" alt="Version">
     <img src="https://img.shields.io/badge/Python-3.10%2B%20%7C%20Docker%20image%203.12-3776AB?style=flat-square&logo=python&logoColor=white" alt="Python">
     <img src="https://img.shields.io/badge/Docker-Compose%20Ready-2496ED?style=flat-square&logo=docker&logoColor=white" alt="Docker">
     <img src="https://img.shields.io/badge/Frontend-Prebuilt-1f8b4c?style=flat-square" alt="Frontend">
@@ -80,19 +80,20 @@
 
 ## Try in 2 minutes
 
+> **Three steps: `clone → set a secret key → docker compose up`.** On macOS/Linux it's **one line**. Most of this README is reference — new users don't need to read it to get started.
+
 **Prerequisites:** [Docker](https://docs.docker.com/get-docker/) with Compose (Docker Desktop on Windows/macOS, or Docker Engine + Compose plugin on Linux), and **Git**. Node.js is **not** required (prebuilt UI is in `frontend/dist`).
 
-### macOS / Linux (Bash)
-
-One line (or run the same steps separately):
+### macOS / Linux (Bash) — one line
 
 ```bash
 git clone https://github.com/brokermr810/QuantDinger.git && cd QuantDinger && cp backend_api_python/env.example backend_api_python/.env && chmod +x scripts/generate-secret-key.sh && ./scripts/generate-secret-key.sh && docker-compose up -d --build
 ```
 
-If `./scripts/generate-secret-key.sh` fails with “Permission denied”, run `chmod +x scripts/generate-secret-key.sh` and retry. If `docker-compose` is not found, try `docker compose` (Compose V2).
+If `docker-compose` is not found, try `docker compose` (Compose V2).
 
-### Windows (PowerShell)
+<details>
+<summary><b>Windows (PowerShell)</b> — click to expand</summary>
 
 Use **PowerShell** (not CMD) in a folder where you want the project. **Docker Desktop** must be running (WSL2 backend recommended).
 
@@ -110,13 +111,15 @@ docker-compose up -d --build
 
 If `docker-compose` is not recognized, use **`docker compose`** (space, no hyphen). If Git is missing, install [Git for Windows](https://git-scm.com/download/win).
 
-### Windows alternative: Git Bash
+**Easier alternative:** if you installed **Git for Windows**, open **Git Bash** and just run the macOS/Linux one-liner above.
 
-If you installed **Git for Windows**, open **Git Bash** and you can use the **macOS / Linux** one-liner above (Bash + `chmod` + `./scripts/generate-secret-key.sh`).
+</details>
 
 ---
 
-Then open **`http://localhost:8888`**, sign in with **`quantdinger` / `123456`**, and **change the default admin password** before any real use. For prerequisites, configuration details, first-run checks, and troubleshooting, continue to **[Installation & first-time setup](#installation--first-time-setup-docker-compose)** below.
+Then open **`http://localhost:8888`**, sign in with **`quantdinger` / `123456`**, and **change the default admin password** before any real use. That's it — go play.
+
+For deeper configuration, first-run checks, and troubleshooting, see **[Installation & first-time setup](#installation--first-time-setup-docker-compose)** further down (everyone else can skip it).
 
 ## Related repositories
 
@@ -132,92 +135,28 @@ This monorepo ships the **backend**, **Docker Compose** stack, **documentation**
 
 ## Use it from an AI agent (Cursor / Claude Code / Codex / MCP)
 
-QuantDinger ships an **Agent Gateway** at `/api/agent/v1` and a small **MCP server** that wraps it as Model Context Protocol tools. Once you sign in once and issue a token, your AI client can read markets, manage strategies, run backtests, and (paper-only by default) place trades — without ever seeing your exchange keys or your admin JWT.
+QuantDinger ships an **Agent Gateway** at `/api/agent/v1` plus a small **MCP server** ([`quantdinger-mcp`](https://pypi.org/project/quantdinger-mcp/) on PyPI) that wraps it as Model Context Protocol tools. Issue a token once and your AI client can read markets, manage strategies, run backtests, and (paper-only by default) place trades — without ever seeing your exchange keys or your admin JWT.
 
-> Two safety properties are non-negotiable: every agent call is **audit-logged**, and trading-class tokens are **paper-only by default**. Live execution requires both `paper_only=false` on the token AND `AGENT_LIVE_TRADING_ENABLED=true` on the server.
+> Every agent call is **audit-logged**, and trading-class tokens are **paper-only by default**. Live execution requires both `paper_only=false` on the token AND `AGENT_LIVE_TRADING_ENABLED=true` on the server.
 
-### Step 1 — Get an agent token (two paths, your choice)
+**Two backends, same client config — only `QUANTDINGER_BASE_URL` differs:**
 
-The MCP client and the wiring in Step 2 are **identical** for both paths — only the value of `QUANTDINGER_BASE_URL` changes.
+- **Hosted (30 s try-out)** — sign up at [ai.quantdinger.com](https://ai.quantdinger.com) → **Sidebar → Agent Tokens** → Issue Token. Locked to `paper_only=true`, no real-money orders.
+- **Self-hosted (this repo)** — after the [Try in 2 minutes](#try-in-2-minutes) Docker bring-up, open `http://localhost:8888/#/agent-tokens`. You control scopes, allowlists, rate limits, and live-trading flag.
 
-**Path A · Hosted ([ai.quantdinger.com](https://ai.quantdinger.com)) — try it in 30 seconds.** Sign up → open **Sidebar → Agent Tokens** → **Issue Token**. The hosted instance is locked to `paper_only=true` and the **T** (Trading) scope is rejected at issuance — agents can read markets, manage strategies in your tenant, and run backtests, but never route real-money orders. Set `QUANTDINGER_BASE_URL=https://ai.quantdinger.com`. Best for: trying QuantDinger from Cursor / Claude Code without installing anything; demos; research notebooks against shared datasets.
-
-**Path B · Self-hosted (this repo) — production / private data / live trading.** After the [Try in 2 minutes](#try-in-2-minutes) Docker bring-up, log in as admin and open **Sidebar → Agent Tokens** (or `http://localhost:8888/#/agent-tokens`). You decide scopes (incl. **T**), market/instrument allowlists, rate limits, and whether `AGENT_LIVE_TRADING_ENABLED=true` is ever flipped. Set `QUANTDINGER_BASE_URL=http://localhost:8888` (or your LAN URL). Best for: anyone with their own exchange keys, anyone with private strategies/data, teams behind a VPN, or anyone who eventually wants live execution.
-
-In either path:
-
-1. Click **Issue Token** → name it (`cursor-mcp`, `claude-research`, …).
-2. Pick scopes — start with **R + B** (read + backtest); add **W** to let the agent create/edit strategies.
-3. Copy the token **once** — the dialog shows the full string once; the server only keeps a SHA-256 hash.
-
-Prefer the CLI? See [`docs/agent/AGENT_QUICKSTART.md`](docs/agent/AGENT_QUICKSTART.md) for the equivalent `curl`.
-
-### Step 2 — Wire the MCP server into your AI client
-
-The MCP server lives in [`mcp_server/`](mcp_server/). Two transports work everywhere:
-
-**A. Local stdio (Cursor, Claude Code, Codex desktop, etc.)** — the server is published on PyPI as [`quantdinger-mcp`](https://pypi.org/project/quantdinger-mcp/). Drop this into `.cursor/mcp.json`, `~/.config/claude/claude_desktop_config.json`, or your client's equivalent (template: [`docs/agent/cursor-mcp.example.json`](docs/agent/cursor-mcp.example.json)):
+Then point Cursor / Claude Code / Codex at the MCP server (`.cursor/mcp.json` template: [`docs/agent/cursor-mcp.example.json`](docs/agent/cursor-mcp.example.json)):
 
 ```json
-{
-  "mcpServers": {
-    "quantdinger": {
-      "command": "uvx",
-      "args": ["quantdinger-mcp"],
-      "env": {
-        "QUANTDINGER_BASE_URL":    "http://localhost:8888",
-        "QUANTDINGER_AGENT_TOKEN": "qd_agent_xxxxxxxx"
-      }
-    }
-  }
-}
+{ "mcpServers": { "quantdinger": {
+  "command": "uvx", "args": ["quantdinger-mcp"],
+  "env": { "QUANTDINGER_BASE_URL": "http://localhost:8888",
+           "QUANTDINGER_AGENT_TOKEN": "qd_agent_xxxxxxxx" }
+} } }
 ```
 
-`uvx` ([install uv](https://docs.astral.sh/uv/getting-started/installation/)) downloads + caches the package on first run; no virtualenv setup. If you prefer pip:
+**Full setup recipe** — local stdio config, remote HTTP transport, Claude Code CLI helper, example agent prompts, audit-log walkthrough: **[`docs/agent/MCP_SETUP.md`](docs/agent/MCP_SETUP.md)**.
 
-```bash
-pip install quantdinger-mcp
-# then use {"command": "quantdinger-mcp", "args": []}
-```
-
-For Claude Code's CLI helper:
-
-```bash
-claude mcp add quantdinger \
-  --env QUANTDINGER_BASE_URL=http://localhost:8888 \
-  --env QUANTDINGER_AGENT_TOKEN=qd_agent_xxxxxxxx \
-  -- uvx quantdinger-mcp
-```
-
-**B. Remote HTTP (cloud agents like OpenClaw / NanoBot, browser IDEs, anything that can't spawn subprocesses)** — run the MCP server as a long-lived service, then point clients at the URL:
-
-```bash
-QUANTDINGER_BASE_URL=https://your-host \
-QUANTDINGER_AGENT_TOKEN=qd_agent_xxxxxxxx \
-QUANTDINGER_MCP_TRANSPORT=streamable-http \
-QUANTDINGER_MCP_HOST=0.0.0.0 \
-QUANTDINGER_MCP_PORT=7800 \
-quantdinger-mcp
-# clients connect to http://your-host:7800
-```
-
-Use `QUANTDINGER_MCP_TRANSPORT=sse` instead for clients that only speak the older SSE transport. Put a reverse proxy in front for TLS and IP allowlisting.
-
-### Step 3 — Talk to your agent
-
-Restart the IDE, then ask things like:
-
-- *"Pull the last 90 daily candles for BTC/USDT and tell me what the regime detector says."*
-- *"Backtest the 20/60 SMA crossover on ETH/USDT 4h between 2024-01-01 and 2024-06-30 and stream the result as it runs."*
-- *"Create a strategy named **eth-trend-bot**, use the indicator I just designed, leave it in `stopped` state."*
-
-Long-running jobs (`/api/agent/v1/jobs/{id}/stream`) are exposed as SSE so the agent can react to partial results without polling. Every call shows up under **Agent Tokens → Audit log** with route, scope class, status code, and duration.
-
-### Want to use QuantDinger as a *coding* agent context too?
-
-If you're editing this repo with Cursor / Claude Code / Codex, the repo also ships a Cursor Skill at [`.cursor/skills/quantdinger-agent-workflow/SKILL.md`](.cursor/skills/quantdinger-agent-workflow/SKILL.md) that explains the Agent Gateway internals, red lines (no real keys, paper-only by default), and where to verify changes. Read [`docs/agent/AGENT_ENVIRONMENT_DESIGN.md`](docs/agent/AGENT_ENVIRONMENT_DESIGN.md) for the full layered-contracts model.
-
-Deeper links: [AI Integration design](docs/agent/AI_INTEGRATION_DESIGN.md) · [Quickstart with `curl`](docs/agent/AGENT_QUICKSTART.md) · [OpenAPI 3.0 spec](docs/agent/agent-openapi.json) · [MCP server README](mcp_server/README.md)
+Deeper references: [AI Integration design](docs/agent/AI_INTEGRATION_DESIGN.md) · [Quickstart with `curl`](docs/agent/AGENT_QUICKSTART.md) · [OpenAPI 3.0 spec](docs/agent/agent-openapi.json) · [MCP server README](mcp_server/README.md)
 
 ## Product overview
 
@@ -331,7 +270,7 @@ flowchart LR
 
 ## Installation & first-time setup (Docker Compose)
 
-**Fast path:** [Try in 2 minutes](#try-in-2-minutes) first. The steps below are the full checklist (same outcome, more detail).
+> **Already ran [Try in 2 minutes](#try-in-2-minutes)?** Skip this section — it's the same outcome, just expanded into a step-by-step checklist for first-time deployers and operations folks who want to understand every knob.
 
 This section mirrors a typical “local deploy” path: **prepare the host → obtain the code → configure secrets → start the stack → verify → harden → optionally wire AI**. Node.js is **not** required: the repo ships a **prebuilt** UI under `frontend/dist` and Nginx serves it inside the `frontend` container.
 
@@ -394,7 +333,7 @@ docker compose -f docker-compose.ghcr.yml up -d
 The backend entrypoint auto-generates a random `SECRET_KEY` on first start and applies the schema (`migrations/init.sql`) idempotently. Edit `backend.env` for persistent overrides (API keys, OAuth, broker credentials). Compose orchestration knobs go in a separate `.env` (optional) — e.g. pin a version:
 
 ```env
-IMAGE_TAG=v3.0.6
+IMAGE_TAG=v3.0.7
 # BACKEND_IMAGE=ghcr.io/<your-fork>/quantdinger-backend     # optional, for forks
 # FRONTEND_IMAGE=ghcr.io/<your-fork>/quantdinger-frontend
 ```

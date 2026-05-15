@@ -152,10 +152,11 @@ class DryRunDeviationService:
             'strategyId': strategy_id,
             'symbol': symbol,
             'timeframe': timeframe,
+            'tfSeconds': int(tf_seconds),
             'market': market,
             'trades': [dev.to_dict() for dev in deviations],
             'summary': summary,
-            'verdict': self._verdict_for(summary),
+            'verdict': self._verdict_for(summary, tf_seconds),
             'sampleSize': len(deviations),
         }
 
@@ -398,19 +399,68 @@ class DryRunDeviationService:
         }
 
     @staticmethod
-    def _verdict_for(summary: Dict[str, Any]) -> Dict[str, Any]:
+    def _verdict_thresholds_for(tf_seconds: int) -> Dict[str, float]:
+        """Verdict thresholds (in bps) scaled by timeframe.
+
+        The report defines slippage as ``(fill_price - previous_bar_close)``.
+        For 1m / 5m bars the previous close is essentially a tick away from
+        the fill, so 5-15 bps is genuinely "good execution". For 1h / 4h
+        bars the same metric also captures the *intra-bar drift* between the
+        last close and whenever the strategy actually fired the order — that
+        drift dominates the number and has nothing to do with execution
+        quality. Without widening the bands here every long-TF strategy
+        would be labelled ``bad`` regardless of how clean the broker fills
+        are.
+
+        Numbers are anchored to empirically reasonable ETH/BTC ranges:
+          - 1m-30m bars: drift ~< 5 bps, fills usually within 10 bps
+          - 1h-2h bars:  drift ~10-20 bps, fills within 30-50 bps is normal
+          - 4h-12h bars: drift ~30-50 bps in liquid alts, 100+ on news days
+          - 1d+ bars:    drift can hit 0.5-1% (50-100 bps) on any move
+        """
+        if tf_seconds <= 0:
+            tf_seconds = 60
+        if tf_seconds < 3600:        # < 1h
+            return {'good_avg': 5.0,  'good_p90': 15.0,  'warn_avg': 20.0,  'warn_p90': 50.0}
+        if tf_seconds < 14400:       # 1h, 2h
+            return {'good_avg': 15.0, 'good_p90': 40.0,  'warn_avg': 50.0,  'warn_p90': 120.0}
+        if tf_seconds < 86400:       # 4h, 6h, 8h, 12h
+            return {'good_avg': 30.0, 'good_p90': 80.0,  'warn_avg': 100.0, 'warn_p90': 250.0}
+        return {'good_avg': 60.0,    'good_p90': 150.0, 'warn_avg': 200.0, 'warn_p90': 500.0}  # 1d+
+
+    @staticmethod
+    def _verdict_for(summary: Dict[str, Any], tf_seconds: int) -> Dict[str, Any]:
+        thresholds = DryRunDeviationService._verdict_thresholds_for(tf_seconds)
         avg = summary.get('avgSlippageBps')
         p90 = summary.get('p90SlippageBps')
         matched = int(summary.get('matchedTrades') or 0)
         if matched < 5 or avg is None:
-            return {'level': 'unknown', 'reason': 'insufficient_sample'}
-        # Thresholds picked to be conservative for liquid crypto pairs; perpetuals
-        # under 5bps round-trip are essentially noise.
-        if avg <= 5 and (p90 or 0) <= 15:
-            return {'level': 'good', 'reason': 'avg_within_5bps'}
-        if avg <= 20 and (p90 or 0) <= 50:
-            return {'level': 'warn', 'reason': 'slippage_elevated'}
-        return {'level': 'bad', 'reason': 'slippage_excessive'}
+            return {
+                'level': 'unknown',
+                'reason': 'insufficient_sample',
+                'thresholds': thresholds,
+                'tfSeconds': int(tf_seconds),
+            }
+        if avg <= thresholds['good_avg'] and (p90 or 0) <= thresholds['good_p90']:
+            return {
+                'level': 'good',
+                'reason': 'within_expected_drift',
+                'thresholds': thresholds,
+                'tfSeconds': int(tf_seconds),
+            }
+        if avg <= thresholds['warn_avg'] and (p90 or 0) <= thresholds['warn_p90']:
+            return {
+                'level': 'warn',
+                'reason': 'slippage_elevated',
+                'thresholds': thresholds,
+                'tfSeconds': int(tf_seconds),
+            }
+        return {
+            'level': 'bad',
+            'reason': 'slippage_excessive',
+            'thresholds': thresholds,
+            'tfSeconds': int(tf_seconds),
+        }
 
     # ------------------------------------------------------------------
     # boilerplate
@@ -423,11 +473,19 @@ class DryRunDeviationService:
         timeframe: str = '',
         reason: str = 'no_trades',
     ) -> Dict[str, Any]:
+        tf_seconds = _timeframe_to_seconds(timeframe) if timeframe else 60
+        thresholds = self._verdict_thresholds_for(tf_seconds)
         return {
             'symbol': symbol,
             'timeframe': timeframe,
+            'tfSeconds': int(tf_seconds),
             'trades': [],
             'summary': self._summarise([]),
-            'verdict': {'level': 'unknown', 'reason': reason},
+            'verdict': {
+                'level': 'unknown',
+                'reason': reason,
+                'thresholds': thresholds,
+                'tfSeconds': int(tf_seconds),
+            },
             'sampleSize': 0,
         }

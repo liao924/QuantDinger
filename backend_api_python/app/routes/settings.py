@@ -141,8 +141,8 @@ CONFIG_SCHEMA = {
                 'key': 'BRAND_APP_VERSION',
                 'label': 'App Version',
                 'type': 'text',
-                'default': '3.0.5',
-                'description': 'Version label shown in the sidebar footer ("V3.0.5"). Frontend bundle version stays unchanged.'
+                'default': '3.0.7',
+                'description': 'Version label shown in the sidebar footer ("V3.0.7"). Frontend bundle version stays unchanged.'
             },
             {
                 'key': 'BRAND_COPYRIGHT',
@@ -662,11 +662,19 @@ CONFIG_SCHEMA = {
                 'description': 'Disable on a multi-tenant SaaS deployment so users see a clear "broker not supported" message instead of broken connect flows. Crypto exchange API keys are unaffected.'
             },
             {
+                'key': 'ENABLED_MARKETS',
+                'label': 'Enabled Markets (whitelist)',
+                'type': 'text',
+                'default': '',
+                'placeholder': 'Crypto,USStock,HKStock',
+                'description': 'CSV whitelist of markets exposed to the UI / Agent API / radar. When set, ONLY listed markets are visible everywhere; the legacy SHOW_CN_STOCK / SHOW_HK_STOCK flags are ignored. Valid values: Crypto, USStock, CNStock, HKStock, Forex, Futures, MOEX. Example: "Crypto,USStock". Empty = whitelist disabled (legacy flags apply).'
+            },
+            {
                 'key': 'SHOW_CN_STOCK',
                 'label': 'Show A-Share (CN Stock) in market picker',
                 'type': 'boolean',
                 'default': 'False',
-                'description': 'Whether to expose the A-Share (CNStock) market type in frontend pickers. Strategy/data code stays intact either way.'
+                'description': 'Legacy flag, ignored when ENABLED_MARKETS is set. Whether to expose the A-Share (CNStock) market type in frontend pickers. Strategy/data code stays intact either way.'
             },
             {
                 'key': 'ENABLE_PENDING_ORDER_WORKER',
@@ -1470,7 +1478,7 @@ def get_public_config():
 # fresh install still ships with sane copy / links instead of blanks.
 _BRAND_DEFAULTS = {
     'app_name': 'QuantDinger',
-    'app_version': '3.0.5',
+    'app_version': '3.0.7',
     'copyright': '© 2025-2026 QuantDinger. All rights reserved.',
     'contact_email': 'brokermr810@gmail.com',
     'contact_support_url': 'https://t.me/quantdinger',

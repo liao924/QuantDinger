@@ -478,10 +478,18 @@ CREATE TABLE IF NOT EXISTS qd_indicator_codes (
    review_note text DEFAULT ''::text NULL,
    reviewed_at timestamp NULL,
    reviewed_by int4 NULL,
-   -- 对已购用户而言，本地副本通过此字段关联到市场上的原始指标，
-   -- 用于后续"同步代码"功能拉取发布者的最新版本
-   source_indicator_id int4 NULL,
-   CONSTRAINT qd_indicator_codes_pkey PRIMARY KEY (id),
+    -- 对已购用户而言，本地副本通过此字段关联到市场上的原始指标，
+    -- 用于后续"同步代码"功能拉取发布者的最新版本
+    source_indicator_id int4 NULL,
+    -- 多语言支持：用户上传的 name / description 用 source_language 标识原始语言
+    -- (zh-CN / en-US / ja-JP 等)；name_i18n / description_i18n 是 LLM 翻译生成的
+    -- JSONB，结构形如 {"en-US": "...", "zh-CN": "...", ...}。
+    -- 市场/详情接口按 Accept-Language 命中：先查 i18n 对应键，未命中再回退到原始 name。
+    -- 见 app/services/indicator_translator.py 与 community_service.py:_localize_indicator。
+    source_language varchar(16) DEFAULT NULL,
+    name_i18n        jsonb       DEFAULT NULL,
+    description_i18n jsonb       DEFAULT NULL,
+    CONSTRAINT qd_indicator_codes_pkey PRIMARY KEY (id),
    CONSTRAINT qd_indicator_codes_user_id_fkey FOREIGN KEY (user_id) REFERENCES qd_users(id) ON DELETE CASCADE
 
 );
@@ -838,7 +846,25 @@ INSERT INTO qd_market_symbols (market, symbol, name, exchange, currency, is_acti
 ('HKStock', '02318', '中国平安', 'HKEX', 'HKD', 1, 1, 94),
 ('HKStock', '00388', '香港交易所', 'HKEX', 'HKD', 1, 1, 93),
 ('HKStock', '00883', '中国海洋石油', 'HKEX', 'HKD', 1, 1, 92),
-('HKStock', '01398', '工商银行', 'HKEX', 'HKD', 1, 1, 91)
+('HKStock', '01398', '工商银行', 'HKEX', 'HKD', 1, 1, 91),
+-- MOEX (Moscow Exchange) blue chips
+-- Tickers are the MOEX ISS instrument codes; resolve_symbol_name() upgrades
+-- the display name from MOEX ISS securities/<sym>.json on first lookup.
+('MOEX', 'SBER',  'Сбербанк',       'MOEX', 'RUB', 1, 1, 100),
+('MOEX', 'GAZP',  'Газпром',        'MOEX', 'RUB', 1, 1, 99),
+('MOEX', 'LKOH',  'Лукойл',         'MOEX', 'RUB', 1, 1, 98),
+('MOEX', 'ROSN',  'Роснефть',       'MOEX', 'RUB', 1, 1, 97),
+('MOEX', 'GMKN',  'Норильский Никель', 'MOEX', 'RUB', 1, 1, 96),
+('MOEX', 'NVTK',  'Новатэк',        'MOEX', 'RUB', 1, 1, 95),
+('MOEX', 'TATN',  'Татнефть',       'MOEX', 'RUB', 1, 1, 94),
+('MOEX', 'VTBR',  'ВТБ',            'MOEX', 'RUB', 1, 1, 93),
+('MOEX', 'MGNT',  'Магнит',         'MOEX', 'RUB', 1, 1, 92),
+('MOEX', 'YNDX',  'Яндекс',         'MOEX', 'RUB', 1, 1, 91),
+('MOEX', 'SBERP', 'Сбербанк-п',     'MOEX', 'RUB', 1, 1, 90),
+('MOEX', 'PLZL',  'Полюс',          'MOEX', 'RUB', 1, 1, 89),
+('MOEX', 'CHMF',  'Северсталь',     'MOEX', 'RUB', 1, 1, 88),
+('MOEX', 'ALRS',  'АЛРОСА',         'MOEX', 'RUB', 1, 1, 87),
+('MOEX', 'MOEX',  'Московская Биржа', 'MOEX', 'RUB', 1, 1, 86)
 ON CONFLICT (market, symbol) DO NOTHING;
 
 -- =============================================================================

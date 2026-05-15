@@ -47,6 +47,14 @@ def get_market_indicators():
         # 限制每页数量
         page_size = min(max(page_size, 1), 50)
         
+        # 多语言：前端在 request.js 自动带 X-App-Lang + Accept-Language。
+        # 优先用 X-App-Lang（前端 UI 语言），fallback 到 Accept-Language 第一个值。
+        accept_lang = (
+            request.headers.get('X-App-Lang')
+            or request.headers.get('Accept-Language', '').split(',')[0].strip()
+            or 'en-US'
+        )
+
         service = get_community_service()
         result = service.get_market_indicators(
             page=page,
@@ -54,7 +62,8 @@ def get_market_indicators():
             keyword=keyword if keyword else None,
             pricing_type=pricing_type,
             sort_by=sort_by,
-            user_id=g.user_id
+            user_id=g.user_id,
+            accept_language=accept_lang,
         )
         
         return jsonify({'code': 1, 'msg': 'success', 'data': result})
@@ -69,8 +78,17 @@ def get_market_indicators():
 def get_indicator_detail(indicator_id: int):
     """获取指标详情"""
     try:
+        accept_lang = (
+            request.headers.get('X-App-Lang')
+            or request.headers.get('Accept-Language', '').split(',')[0].strip()
+            or 'en-US'
+        )
         service = get_community_service()
-        result = service.get_indicator_detail(indicator_id, user_id=g.user_id)
+        result = service.get_indicator_detail(
+            indicator_id,
+            user_id=g.user_id,
+            accept_language=accept_lang,
+        )
         
         if not result:
             return jsonify({'code': 0, 'msg': 'indicator_not_found', 'data': None}), 404
@@ -172,6 +190,72 @@ def get_my_purchases():
         
     except Exception as e:
         logger.error(f"get_my_purchases failed: {e}")
+        return jsonify({'code': 0, 'msg': str(e), 'data': None}), 500
+
+
+# ==========================================
+# 作者后台 (Author Dashboard)
+#
+# 普通用户上传指标到市场后，需要一个轻量的「我的发布 / 销量 / 收入 / 评分」
+# 概览页。这三个端点都按 g.user_id 过滤，不会泄露其它作者数据。
+# 实现细节见 services/community_service.py 的同名方法。
+# ==========================================
+
+@community_bp.route("/author/summary", methods=["GET"])
+@login_required
+def get_author_summary():
+    """作者总览：发布数 / 已通过 / 待审核 / 总销量 / 总收入 / 平均评分。"""
+    try:
+        service = get_community_service()
+        result = service.get_author_summary(user_id=g.user_id)
+        return jsonify({'code': 1, 'msg': 'success', 'data': result})
+    except Exception as e:
+        logger.error(f"get_author_summary failed: {e}")
+        return jsonify({'code': 0, 'msg': str(e), 'data': None}), 500
+
+
+@community_bp.route("/author/published", methods=["GET"])
+@login_required
+def get_author_published():
+    """作者发布的指标列表 + 每条销量/收入/评分。"""
+    try:
+        page = int(request.args.get('page', 1))
+        page_size = int(request.args.get('page_size', 20))
+        page_size = min(max(page_size, 1), 50)
+
+        service = get_community_service()
+        result = service.get_author_published(
+            user_id=g.user_id,
+            page=page,
+            page_size=page_size,
+        )
+        return jsonify({'code': 1, 'msg': 'success', 'data': result})
+    except Exception as e:
+        logger.error(f"get_author_published failed: {e}")
+        return jsonify({'code': 0, 'msg': str(e), 'data': None}), 500
+
+
+@community_bp.route("/author/sales", methods=["GET"])
+@login_required
+def get_author_sales():
+    """作者销售明细：按购买记录分页，可选 indicator_id 过滤。"""
+    try:
+        page = int(request.args.get('page', 1))
+        page_size = int(request.args.get('page_size', 20))
+        page_size = min(max(page_size, 1), 100)
+        indicator_id_raw = request.args.get('indicator_id', '').strip()
+        indicator_id = int(indicator_id_raw) if indicator_id_raw else None
+
+        service = get_community_service()
+        result = service.get_author_sales(
+            user_id=g.user_id,
+            page=page,
+            page_size=page_size,
+            indicator_id=indicator_id,
+        )
+        return jsonify({'code': 1, 'msg': 'success', 'data': result})
+    except Exception as e:
+        logger.error(f"get_author_sales failed: {e}")
         return jsonify({'code': 0, 'msg': str(e), 'data': None}), 500
 
 

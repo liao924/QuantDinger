@@ -452,22 +452,65 @@ class CryptoDataSource(BaseDataSource):
                 max_batches = 6000
                 empty_streak = 0
                 max_empty = 6
+                # Long-range fetches (months of 5m candles) need to be defensive
+                # about transient exchange errors and rate limits. We do per-batch
+                # retries, a short sleep between batches, and a wall-clock budget
+                # so the calling HTTP request can't spin forever and 500 out.
+                import time as _t
+                retry_per_batch = 2
+                inter_batch_sleep = 0.0
+                if not getattr(self.exchange, 'enableRateLimit', False):
+                    # If CCXT isn't throttling for us, throttle ourselves to ~6 req/s
+                    # to stay below typical exchange ceilings.
+                    inter_batch_sleep = 0.15
+                fetch_started_at = _t.monotonic()
+                # Hard wall-clock budget. 5m / 90 days needs ~86 batches; assume
+                # 1.5s/batch worst case => ~130s. We give 180s headroom.
+                fetch_budget_seconds = 180.0
 
-                for _ in range(max_batches):
+                for batch_idx in range(max_batches):
                     if current_since >= end_ms:
                         break
-                    batch = self.exchange.fetch_ohlcv(
-                        symbol_pair,
-                        ccxt_timeframe,
-                        since=current_since,
-                        limit=batch_limit,
-                    )
+                    if (_t.monotonic() - fetch_started_at) > fetch_budget_seconds:
+                        logger.warning(
+                            f"CCXT paginated fetch budget exceeded for {symbol_pair} {ccxt_timeframe} "
+                            f"after {batch_idx} batches ({len(all_ohlcv)} candles); returning partial."
+                        )
+                        break
+
+                    batch = None
+                    last_err = None
+                    for attempt in range(retry_per_batch + 1):
+                        try:
+                            batch = self.exchange.fetch_ohlcv(
+                                symbol_pair,
+                                ccxt_timeframe,
+                                since=current_since,
+                                limit=batch_limit,
+                            )
+                            break
+                        except Exception as exc:
+                            last_err = exc
+                            if attempt < retry_per_batch:
+                                # Brief back-off (0.5s, 1.5s) tolerates short rate-limit / network blips
+                                # without amplifying load when the exchange is genuinely down.
+                                _t.sleep(0.5 + attempt * 1.0)
+                                continue
+                            raise
+                    if batch is None:
+                        # Exhausted retries — re-raise so the outer except can flip
+                        # to the fallback path. Should not reach here because the
+                        # last attempt re-raises directly, but kept for clarity.
+                        raise last_err if last_err else RuntimeError("CCXT fetch_ohlcv failed without error")
+
                     if not batch:
                         empty_streak += 1
                         if empty_streak >= max_empty:
                             break
                         # 跳过可能的空档，避免卡死在同一 since
                         current_since += timeframe_ms * min(batch_limit, 64)
+                        if inter_batch_sleep:
+                            _t.sleep(inter_batch_sleep)
                         continue
                     empty_streak = 0
                     all_ohlcv.extend(batch)
@@ -478,16 +521,24 @@ class CryptoDataSource(BaseDataSource):
                     if next_since <= current_since:
                         break
                     current_since = next_since
+                    if inter_batch_sleep:
+                        _t.sleep(inter_batch_sleep)
 
                 # 按开盘时间去重并排序，防止分页重叠
                 by_ts = {int(row[0]): row for row in all_ohlcv if row and len(row) >= 6}
                 ohlcv = sorted(by_ts.values(), key=lambda r: r[0])
             else:
-                ohlcv = self.exchange.fetch_ohlcv(symbol_pair, ccxt_timeframe, limit=limit)
-            
+                # No window specified: ask for at most the exchange's per-call cap.
+                # Passing the raw `limit` here can be tens of thousands for long
+                # high-precision backtests; most exchanges respond by either
+                # rejecting the request outright or silently truncating, which
+                # downstream code then interprets as "empty data".
+                safe_limit = min(int(limit), self._SINGLE_FETCH_HARD_CAP)
+                ohlcv = self.exchange.fetch_ohlcv(symbol_pair, ccxt_timeframe, limit=safe_limit)
+
             # logger.info(f"CCXT 返回 {len(ohlcv) if ohlcv else 0} 条数据")
             return ohlcv
-            
+
         except Exception as e:
             logger.warning(f"CCXT fetch_ohlcv failed: {str(e)}; trying fallback")
             return self._fetch_ohlcv_fallback(
@@ -523,7 +574,14 @@ class CryptoDataSource(BaseDataSource):
             else:
                 since = int((datetime.now() - timedelta(seconds=total_seconds)).timestamp() * 1000)
             
-            ohlcv = self.exchange.fetch_ohlcv(symbol_pair, ccxt_timeframe, since=since, limit=limit)
+            # IMPORTANT: most exchanges cap fetch_ohlcv at 300–1000 candles per
+            # call. The original code forwarded the caller's `limit` verbatim
+            # (often 50k+ for long-range backtests), which the exchange would
+            # then reject or silently truncate — making this "fallback" useless
+            # exactly when it mattered. Cap it so we at least return one valid
+            # page of data, which downstream callers can then handle gracefully.
+            safe_limit = min(int(limit), self._SINGLE_FETCH_HARD_CAP)
+            ohlcv = self.exchange.fetch_ohlcv(symbol_pair, ccxt_timeframe, since=since, limit=safe_limit)
             # logger.info(f"CCXT 备用方法返回 {len(ohlcv) if ohlcv else 0} 条数据")
             return ohlcv
         except Exception as e:

@@ -8,6 +8,7 @@ from datetime import datetime
 
 from app.utils.logger import get_logger
 from app.utils.db import get_db_connection
+from app.services.symbol_name import normalize_crypto_symbol
 
 logger = get_logger(__name__)
 
@@ -1036,6 +1037,18 @@ class StrategyService:
 
         # Denormalized fields for quick list rendering
         symbol = (trading_config or {}).get('symbol')
+
+        # Canonicalise Crypto symbols (``BTC`` -> ``BTC/USDT``) right before
+        # we persist so the DB never holds two different shapes for the same
+        # underlying pair. Equity / FX / futures markets pass through
+        # unchanged. Write the normalised value back into trading_config so
+        # the JSON copy stored alongside the denormalised column also reflects
+        # the canonical form — the live trading worker and execution layer
+        # both read symbol from trading_config['symbol'].
+        if market_category == 'Crypto' and isinstance(symbol, str) and symbol:
+            symbol = normalize_crypto_symbol(symbol)
+            if isinstance(trading_config, dict):
+                trading_config['symbol'] = symbol
         timeframe = (trading_config or {}).get('timeframe')
         initial_capital = (trading_config or {}).get('initial_capital') or payload.get('initial_capital') or 1000
         leverage = (trading_config or {}).get('leverage') or 1
@@ -1169,7 +1182,14 @@ class StrategyService:
                 else:
                     market_category = payload.get('market_category') or 'Crypto'
                     symbol_name = symbol
-                
+
+                # Canonicalise Crypto here so the *strategy name* suffix
+                # matches the symbol that will end up in the DB. Without this
+                # the user sees "Strategy-BTC" but the row stores "BTC/USDT",
+                # which is fine functionally but confusing in the UI.
+                if market_category == 'Crypto' and isinstance(symbol_name, str) and symbol_name:
+                    symbol_name = normalize_crypto_symbol(symbol_name)
+
                 # Strategy name with symbol suffix
                 single_payload['strategy_name'] = f"{base_name}-{symbol_name}"
                 single_payload['strategy_group_id'] = strategy_group_id
@@ -1361,6 +1381,14 @@ class StrategyService:
             )
 
         symbol = (trading_config or {}).get('symbol')
+        # Same canonicalisation as create_strategy: keep the persisted shape
+        # consistent regardless of whether the row was written by create or
+        # update. The runtime executor reads symbol from trading_config, so
+        # we also write the normalised value back into the JSON copy.
+        if market_category == 'Crypto' and isinstance(symbol, str) and symbol:
+            symbol = normalize_crypto_symbol(symbol)
+            if isinstance(trading_config, dict):
+                trading_config['symbol'] = symbol
         timeframe = (trading_config or {}).get('timeframe')
         initial_capital = (trading_config or {}).get('initial_capital') or existing.get('initial_capital') or 1000
         leverage = (trading_config or {}).get('leverage') or existing.get('leverage') or 1

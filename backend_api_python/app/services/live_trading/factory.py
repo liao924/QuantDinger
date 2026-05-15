@@ -110,6 +110,10 @@ def exchange_demo_mode_enabled(cfg: Dict[str, Any]) -> bool:
         "sandbox",
         "paper_trading",
         "paperTrading",
+        # Alpaca stores its paper/live flag as a bare `paper` boolean — alias it
+        # so /api/credentials/list shows the right paper badge on Alpaca rows.
+        "paper",
+        "is_paper",
     ):
         v = cfg.get(k)
         if v is None:

@@ -46,7 +46,7 @@
 
   <p style="margin-top: 1.45rem; margin-bottom: 10px;">
     <a href="../LICENSE"><img src="https://img.shields.io/badge/License-Apache%202.0-blue.svg?style=flat-square&logo=apache" alt="License"></a>
-    <img src="https://img.shields.io/badge/Version-3.0.5-orange?style=flat-square" alt="Version">
+    <img src="https://img.shields.io/badge/Version-3.0.7-orange?style=flat-square" alt="Version">
     <img src="https://img.shields.io/badge/Python-3.10%2B%20%7C%20Docker%203.12-3776AB?style=flat-square&logo=python&logoColor=white" alt="Python">
     <img src="https://img.shields.io/badge/Docker-Compose-2496ED?style=flat-square&logo=docker&logoColor=white" alt="Docker">
     <img src="https://img.shields.io/github/stars/brokermr810/QuantDinger?style=flat-square&logo=github" alt="Stars">
@@ -115,6 +115,7 @@ Mở **`http://localhost:8888`**, đăng nhập **`quantdinger` / `123456`**, r�
 
 Dành cho **Cursor / Claude Code / Codex**: **Model Context Protocol (MCP)** và **Agent Gateway** (`/api/agent/v1`). Tài liệu chi tiết bằng tiếng Anh là nguồn chính:
 
+- **Hướng dẫn kết nối:** [**MCP_SETUP.md**](agent/MCP_SETUP.md) — Hosted / tự host, stdio cục bộ, HTTP từ xa, Claude Code CLI gộp trong một trang.
 - [AGENT_QUICKSTART.md](agent/AGENT_QUICKSTART.md) · [AI_INTEGRATION_DESIGN.md](agent/AI_INTEGRATION_DESIGN.md) · [agent-openapi.json](agent/agent-openapi.json)
 - Máy chủ MCP: [`../mcp_server/README.md`](../mcp_server/README.md) · PyPI [`quantdinger-mcp`](https://pypi.org/project/quantdinger-mcp/)
 
@@ -206,7 +207,7 @@ flowchart LR
      curl -o backend.env https://raw.githubusercontent.com/brokermr810/QuantDinger/main/backend_api_python/env.example
      docker compose -f docker-compose.ghcr.yml up -d
      ```
-     Image mặc định: `ghcr.io/brokermr810/quantdinger-{backend,frontend}:latest`. Ghim phiên bản bằng `IMAGE_TAG=v3.0.6` trong `.env` cục bộ.
+     Image mặc định: `ghcr.io/brokermr810/quantdinger-{backend,frontend}:latest`. Ghim phiên bản bằng `IMAGE_TAG=v3.0.7` trong `.env` cục bộ.
 4. **Web:** `http://localhost:8888` · **Sức khỏe API:** `http://localhost:5000/api/health`
 5. Đổi mật khẩu quản trị mặc định trước production. Đặt **`FRONTEND_URL`** trong `backend_api_python/.env` đúng URL thực tế.
 

@@ -22,7 +22,6 @@ Endpoints:
 
 from __future__ import annotations
 
-import os
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
@@ -264,41 +263,26 @@ def adanos_market_sentiment():
         return jsonify({"code": 0, "msg": str(e), "data": None}), 500
 
 
-def _env_flag(name: str, default: str = "false") -> bool:
-    """Parse a boolean-ish env var. Mirrors the convention used by
-    `routes/market.py` so that operators only have to learn one rule."""
-    return str(os.getenv(name, default)).strip().lower() in ("1", "true", "yes", "on")
-
-
 def _compute_trading_opportunities():
     """Run all market scanners sequentially. Each scanner is resilient and
     only contributes to the accumulator on success.
 
-    Markets gated by env flags (kept in lock-step with `/api/market/types`
-    in routes/market.py so the radar never surfaces a market the rest of
-    the UI has hidden):
-      - SHOW_CN_STOCK (default false): China A-shares
-      - SHOW_HK_STOCK (default true):  Hong Kong stocks
+    Per-market visibility comes from :func:`app.utils.market_visibility.is_market_visible`
+    so the radar never surfaces a market that the watchlist picker has hidden.
     Skipping a disabled market also avoids the (slow) upstream price /
     fundamentals fetches for it, so the cache miss latency drops too.
     """
-    show_cn_stock = _env_flag("SHOW_CN_STOCK", "false")
-    show_hk_stock = _env_flag("SHOW_HK_STOCK", "true")
+    from app.utils.market_visibility import is_market_visible as _vis
 
     opportunities: list = []
-    scanners = [
+    candidate_scanners = [
         ("Crypto",  lambda: analyze_opportunities_crypto(opportunities)),
         ("USStock", lambda: analyze_opportunities_stocks(opportunities)),
         ("Forex",   lambda: analyze_opportunities_forex(opportunities)),
+        ("CNStock", lambda: analyze_opportunities_local_stocks(opportunities, "CNStock")),
+        ("HKStock", lambda: analyze_opportunities_local_stocks(opportunities, "HKStock")),
     ]
-    if show_cn_stock:
-        scanners.append(
-            ("CNStock", lambda: analyze_opportunities_local_stocks(opportunities, "CNStock"))
-        )
-    if show_hk_stock:
-        scanners.append(
-            ("HKStock", lambda: analyze_opportunities_local_stocks(opportunities, "HKStock"))
-        )
+    scanners = [(label, fn) for label, fn in candidate_scanners if _vis(label)]
 
     for label, scanner in scanners:
         try:
@@ -333,11 +317,8 @@ def trading_opportunities():
         # holds (or a future scanner accidentally includes) data for a market
         # the operator has disabled in env, the response is guaranteed to be
         # consistent with `/api/market/types`.
-        hidden = set()
-        if not _env_flag("SHOW_CN_STOCK", "false"):
-            hidden.add("CNStock")
-        if not _env_flag("SHOW_HK_STOCK", "true"):
-            hidden.add("HKStock")
+        from app.utils.market_visibility import hidden_markets as _hidden
+        hidden = _hidden()
         if hidden and isinstance(data, list):
             data = [o for o in data if (o.get("market") if isinstance(o, dict) else None) not in hidden]
 

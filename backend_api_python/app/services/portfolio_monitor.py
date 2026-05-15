@@ -1660,35 +1660,39 @@ def _check_position_alerts():
 
 def notify_strategy_signal_for_positions(market: str, symbol: str, signal_type: str, signal_detail: str, user_id: int = None):
     """
-    Called when a strategy signal is triggered. 
-    Check if user has manual positions in this symbol and send notification.
+    Called when a strategy signal is triggered.
+    Check if the **strategy owner** has manual positions in this symbol and send a
+    notification to them.
+
+    Security note: this function is fail-closed on ``user_id``. Earlier versions
+    silently fell back to ``WHERE symbol = ?`` (no user filter) when callers
+    omitted ``user_id``, which caused user A's strategy signal to fan out to
+    every user holding the same symbol and leaked strategy name / signal
+    details across tenants. Callers MUST pass the strategy owner's ``user_id``.
     """
     try:
         symbol = (symbol or '').strip().upper()
         if not symbol:
             return
-        
+
+        if user_id is None:
+            logger.warning(
+                "notify_strategy_signal_for_positions called without user_id; "
+                "refusing to broadcast across users (symbol=%s, signal=%s)",
+                symbol, signal_type,
+            )
+            return
+
         with get_db_connection() as db:
             cur = db.cursor()
-            # Query positions for all users or specific user
-            if user_id is not None:
-                cur.execute(
-                    """
-                    SELECT id, user_id, market, symbol, name, side, quantity, entry_price, group_name
-                    FROM qd_manual_positions
-                    WHERE user_id = ? AND symbol = ?
-                    """,
-                    (user_id, symbol)
-                )
-            else:
-                cur.execute(
-                    """
-                    SELECT id, user_id, market, symbol, name, side, quantity, entry_price, group_name
-                    FROM qd_manual_positions
-                    WHERE symbol = ?
-                    """,
-                    (symbol,)
-                )
+            cur.execute(
+                """
+                SELECT id, user_id, market, symbol, name, side, quantity, entry_price, group_name
+                FROM qd_manual_positions
+                WHERE user_id = ? AND symbol = ?
+                """,
+                (user_id, symbol),
+            )
             positions = cur.fetchall() or []
             cur.close()
         

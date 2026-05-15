@@ -16,7 +16,7 @@ from app.utils.logger import get_logger
 from app.utils.cache import CacheManager
 from app.utils.db import get_db_connection
 from app.utils.auth import login_required
-from app.services.symbol_name import resolve_symbol_name
+from app.services.symbol_name import resolve_symbol_name, normalize_crypto_symbol
 from app.data.market_symbols_seed import get_symbol_name as seed_get_symbol_name
 
 logger = get_logger(__name__)
@@ -267,7 +267,14 @@ def add_position():
         
         if not market or not symbol:
             return jsonify({'code': 0, 'msg': 'Missing market or symbol', 'data': None}), 400
-        
+
+        # Canonicalise Crypto symbols (BTC -> BTC/USDT, BTCUSDT -> BTC/USDT)
+        # so positions, watchlist and strategies all dedupe on the same key.
+        # See app.services.symbol_name.normalize_crypto_symbol for the full
+        # contract.
+        if market == 'Crypto':
+            symbol = normalize_crypto_symbol(symbol)
+
         if quantity <= 0:
             return jsonify({'code': 0, 'msg': 'Quantity must be positive', 'data': None}), 400
         

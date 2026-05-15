@@ -13,6 +13,7 @@ from app.utils.db import get_db_connection
 from app.utils.logger import get_logger
 from app.services.billing_service import get_billing_service
 from app.services.experiment.scoring import StrategyScoringService
+from app.services.indicator_translator import pick_localized
 
 logger = get_logger(__name__)
 
@@ -216,6 +217,14 @@ class CommunityService:
                     "CREATE INDEX IF NOT EXISTS idx_indicator_codes_source "
                     "ON qd_indicator_codes USING btree (source_indicator_id)"
                 )
+                # Multi-language support: LLM-translated name/description payloads.
+                # source_language stores the original language code (e.g. 'zh-CN') and
+                # *_i18n stores a JSONB dict {"en-US": "...", "zh-CN": "...", ...} that
+                # downstream get_market_indicators / get_indicator_detail will pick
+                # from based on the request's Accept-Language header.
+                cur.execute("ALTER TABLE qd_indicator_codes ADD COLUMN IF NOT EXISTS source_language VARCHAR(16)")
+                cur.execute("ALTER TABLE qd_indicator_codes ADD COLUMN IF NOT EXISTS name_i18n JSONB")
+                cur.execute("ALTER TABLE qd_indicator_codes ADD COLUMN IF NOT EXISTS description_i18n JSONB")
                 db.commit()
                 cur.close()
         except Exception:
@@ -232,7 +241,8 @@ class CommunityService:
         keyword: str = None,
         pricing_type: str = None,  # 'free' / 'paid' / None(all)
         sort_by: str = 'score',    # 'score' / 'newest' / 'hot' / 'price_asc' / 'price_desc' / 'rating'
-        user_id: int = None        # 当前用户ID，用于判断是否已购买
+        user_id: int = None,       # 当前用户ID，用于判断是否已购买
+        accept_language: str = 'en-US'  # 用于挑选 name_i18n / description_i18n
     ) -> Dict[str, Any]:
         """获取市场上已发布的指标列表
 
@@ -324,6 +334,7 @@ class CommunityService:
                             i.id, i.name, i.description, i.pricing_type, i.price, COALESCE(i.vip_free, FALSE) as vip_free,
                             i.preview_image, i.purchase_count, i.avg_rating, i.rating_count,
                             i.view_count, i.created_at, i.updated_at,
+                            i.source_language, i.name_i18n, i.description_i18n,
                             u.id as author_id, u.username as author_username,
                             u.nickname as author_nickname, u.avatar as author_avatar
                         FROM qd_indicator_codes i
@@ -342,6 +353,7 @@ class CommunityService:
                             i.id, i.name, i.description, i.pricing_type, i.price, COALESCE(i.vip_free, FALSE) as vip_free,
                             i.preview_image, i.purchase_count, i.avg_rating, i.rating_count,
                             i.view_count, i.created_at, i.updated_at,
+                            i.source_language, i.name_i18n, i.description_i18n,
                             u.id as author_id, u.username as author_username,
                             u.nickname as author_nickname, u.avatar as author_avatar
                         FROM qd_indicator_codes i
@@ -372,10 +384,25 @@ class CommunityService:
                 items = []
                 for row in rows:
                     kpi = page_kpis.get(row['id'], _summarise_indicator_runs([]))
+                    # i18n 多语言：按当前 Accept-Language 选 name/description。
+                    # 未配置 i18n 字段的老指标会 fallback 到原始 name/description。
+                    _src_lang = row.get('source_language') if isinstance(row, dict) else None
+                    localized_name = pick_localized(
+                        row['name'],
+                        row.get('name_i18n') if isinstance(row, dict) else None,
+                        accept_language,
+                        _src_lang,
+                    )
+                    localized_desc = pick_localized(
+                        row['description'],
+                        row.get('description_i18n') if isinstance(row, dict) else None,
+                        accept_language,
+                        _src_lang,
+                    )
                     items.append({
                         'id': row['id'],
-                        'name': row['name'],
-                        'description': row['description'][:200] if row['description'] else '',
+                        'name': localized_name,
+                        'description': localized_desc[:200] if localized_desc else '',
                         'pricing_type': row['pricing_type'] or 'free',
                         'price': float(row['price'] or 0),
                         'vip_free': bool(row.get('vip_free') or False),
@@ -421,8 +448,16 @@ class CommunityService:
             logger.error(f"get_market_indicators failed: {e}")
             return {'items': [], 'total': 0, 'page': 1, 'page_size': page_size, 'total_pages': 0}
     
-    def get_indicator_detail(self, indicator_id: int, user_id: int = None) -> Optional[Dict[str, Any]]:
-        """获取指标详情"""
+    def get_indicator_detail(
+        self,
+        indicator_id: int,
+        user_id: int = None,
+        accept_language: str = 'en-US',
+    ) -> Optional[Dict[str, Any]]:
+        """获取指标详情。
+
+        ``accept_language`` 用于挑选 i18n 字段。未提供时退回 en-US。
+        """
         try:
             with get_db_connection() as db:
                 cur = db.cursor()
@@ -434,6 +469,7 @@ class CommunityService:
                         i.preview_image, i.purchase_count, i.avg_rating, i.rating_count,
                         i.view_count, i.publish_to_community, i.created_at, i.updated_at,
                         i.user_id,
+                        i.source_language, i.name_i18n, i.description_i18n,
                         u.id as author_id, u.username as author_username, 
                         u.nickname as author_nickname, u.avatar as author_avatar
                     FROM qd_indicator_codes i
@@ -452,16 +488,30 @@ class CommunityService:
                     return None
                 
                 # 检查是否已购买
+                # We also pull `price` from the purchase row so the frontend can
+                # show the buyer their *actual paid amount* (which can differ
+                # from the indicator's current price after a discount / price
+                # hike). The current price still lives in `row['price']`.
                 is_purchased = False
+                your_purchase_price = None
+                your_purchase_time = None
                 has_update = False
                 local_copy_id = None
                 if user_id:
                     cur.execute(
-                        "SELECT id FROM qd_indicator_purchases WHERE indicator_id = ? AND buyer_id = ?",
+                        "SELECT id, price, created_at FROM qd_indicator_purchases "
+                        "WHERE indicator_id = ? AND buyer_id = ? ORDER BY id DESC LIMIT 1",
                         (indicator_id, user_id)
                     )
-                    is_purchased = cur.fetchone() is not None
+                    purchase_row = cur.fetchone()
+                    is_purchased = purchase_row is not None
                     if is_purchased:
+                        try:
+                            your_purchase_price = float(purchase_row['price'] or 0)
+                        except (TypeError, ValueError):
+                            your_purchase_price = 0.0
+                        if purchase_row.get('created_at'):
+                            your_purchase_time = purchase_row['created_at'].isoformat()
                         # Look up buyer's local copy so the frontend can tell
                         # whether a code-sync is needed.
                         local_copy = self._find_buyer_local_copy(
@@ -490,10 +540,19 @@ class CommunityService:
                 db.commit()
                 cur.close()
                 
+                # i18n 多语言：按 Accept-Language 命中 name_i18n / description_i18n
+                _src_lang = row.get('source_language') if isinstance(row, dict) else None
+                localized_name = pick_localized(
+                    row['name'], row.get('name_i18n'), accept_language, _src_lang,
+                )
+                localized_desc = pick_localized(
+                    row['description'], row.get('description_i18n'), accept_language, _src_lang,
+                )
+
                 return {
                     'id': row['id'],
-                    'name': row['name'],
-                    'description': row['description'] or '',
+                    'name': localized_name,
+                    'description': localized_desc or '',
                     'pricing_type': row['pricing_type'] or 'free',
                     'price': float(row['price'] or 0),
                     'vip_free': bool(row.get('vip_free') or False),
@@ -511,6 +570,8 @@ class CommunityService:
                         'avatar': row['author_avatar'] or '/avatar2.jpg'
                     },
                     'is_purchased': is_purchased,
+                    'your_purchase_price': your_purchase_price,
+                    'your_purchase_time': your_purchase_time,
                     'is_own': row['user_id'] == user_id,
                     'has_update': has_update,
                     'local_copy_id': local_copy_id
@@ -894,7 +955,265 @@ class CommunityService:
         except Exception as e:
             logger.error(f"get_my_purchases failed: {e}")
             return {'items': [], 'total': 0, 'page': 1, 'page_size': page_size, 'total_pages': 0}
-    
+
+    # ==========================================
+    # 作者后台 (Author Dashboard)
+    # ==========================================
+    #
+    # 这三个方法服务于 /api/community/author/* 端点，给「上传过指标的普通用户」
+    # 一个轻量的销售/收入概览。设计原则：
+    #   - 全部按当前登录用户的 user_id 过滤，不暴露其它作者数据；
+    #   - 跨连接做 SUM/COUNT 时一次查完，避免前端再 N+1 聚合；
+    #   - 列表分页与 get_my_purchases 保持一致字段（items/total/page/total_pages）。
+
+    def get_author_summary(self, user_id: int) -> Dict[str, Any]:
+        """获取作者的总览统计：发布数 / 已通过数 / 待审核数 / 总销量 / 总收入 / 平均评分。
+
+        Returns dict with int/float scalars (永远返回结构完整的 dict，
+        即使数据库出错也回退到全 0，保证前端不需要做空判断)。
+        """
+        empty = {
+            'published_total': 0,
+            'approved_count': 0,
+            'pending_count': 0,
+            'rejected_count': 0,
+            'total_sales': 0,
+            'total_revenue': 0.0,
+            'avg_rating': 0.0,
+            'rating_count': 0,
+        }
+        try:
+            with get_db_connection() as db:
+                cur = db.cursor()
+
+                cur.execute(
+                    """
+                    SELECT
+                        COUNT(*) AS published_total,
+                        COALESCE(SUM(CASE WHEN review_status = 'approved' OR review_status IS NULL THEN 1 ELSE 0 END), 0) AS approved_count,
+                        COALESCE(SUM(CASE WHEN review_status = 'pending'  THEN 1 ELSE 0 END), 0) AS pending_count,
+                        COALESCE(SUM(CASE WHEN review_status = 'rejected' THEN 1 ELSE 0 END), 0) AS rejected_count,
+                        COALESCE(SUM(purchase_count), 0) AS total_sales,
+                        COALESCE(SUM(rating_count), 0)   AS rating_count_total
+                    FROM qd_indicator_codes
+                    WHERE user_id = ? AND publish_to_community = 1
+                      AND (is_buy IS NULL OR is_buy = 0)
+                    """,
+                    (user_id,),
+                )
+                row = cur.fetchone() or {}
+
+                # 总收入：从 purchases 表按 seller_id 汇总（更准确，
+                # 因为 indicators.price 可能改过，而 purchases.price 记录的是
+                # 每一笔成交时的真实价格）
+                cur.execute(
+                    """
+                    SELECT COALESCE(SUM(price), 0) AS total_revenue
+                    FROM qd_indicator_purchases
+                    WHERE seller_id = ?
+                    """,
+                    (user_id,),
+                )
+                rev_row = cur.fetchone() or {}
+
+                # 平均评分：按所有有评分的指标做加权平均（rating_count 作为权重），
+                # 而不是简单平均 avg_rating，避免「只有一个 5 星」和「100 条 4.5」
+                # 同等权重。
+                cur.execute(
+                    """
+                    SELECT
+                        COALESCE(SUM(avg_rating * rating_count), 0) AS weighted_sum,
+                        COALESCE(SUM(rating_count), 0)              AS rating_count
+                    FROM qd_indicator_codes
+                    WHERE user_id = ? AND publish_to_community = 1
+                      AND rating_count > 0
+                    """,
+                    (user_id,),
+                )
+                rate_row = cur.fetchone() or {}
+                cur.close()
+
+                rating_count = int(rate_row.get('rating_count') or 0)
+                weighted_sum = float(rate_row.get('weighted_sum') or 0)
+                avg_rating = round(weighted_sum / rating_count, 2) if rating_count > 0 else 0.0
+
+                return {
+                    'published_total': int(row.get('published_total') or 0),
+                    'approved_count':  int(row.get('approved_count') or 0),
+                    'pending_count':   int(row.get('pending_count') or 0),
+                    'rejected_count':  int(row.get('rejected_count') or 0),
+                    'total_sales':     int(row.get('total_sales') or 0),
+                    'total_revenue':   float(rev_row.get('total_revenue') or 0),
+                    'avg_rating':      avg_rating,
+                    'rating_count':    rating_count,
+                }
+        except Exception as e:
+            logger.error(f"get_author_summary failed: {e}")
+            return empty
+
+    def get_author_published(
+        self,
+        user_id: int,
+        page: int = 1,
+        page_size: int = 20,
+    ) -> Dict[str, Any]:
+        """获取作者「我发布的指标」列表。
+
+        每条记录附带：销量、评分、评分数、累计收入(基于 purchases.price 求和)、
+        当前价格、定价类型、审核状态。
+        """
+        offset = (max(page, 1) - 1) * page_size
+        try:
+            with get_db_connection() as db:
+                cur = db.cursor()
+
+                cur.execute(
+                    """
+                    SELECT COUNT(*) AS count
+                    FROM qd_indicator_codes
+                    WHERE user_id = ? AND publish_to_community = 1
+                      AND (is_buy IS NULL OR is_buy = 0)
+                    """,
+                    (user_id,),
+                )
+                total = int((cur.fetchone() or {}).get('count') or 0)
+
+                cur.execute(
+                    """
+                    SELECT
+                        i.id, i.name, i.description, i.preview_image,
+                        i.pricing_type, i.price, i.vip_free,
+                        i.purchase_count, i.avg_rating, i.rating_count,
+                        i.view_count, i.review_status, i.review_note,
+                        i.created_at, i.updated_at,
+                        COALESCE((
+                            SELECT SUM(p.price)
+                            FROM qd_indicator_purchases p
+                            WHERE p.indicator_id = i.id
+                        ), 0) AS revenue
+                    FROM qd_indicator_codes i
+                    WHERE i.user_id = ? AND i.publish_to_community = 1
+                      AND (i.is_buy IS NULL OR i.is_buy = 0)
+                    ORDER BY i.purchase_count DESC, i.id DESC
+                    LIMIT ? OFFSET ?
+                    """,
+                    (user_id, page_size, offset),
+                )
+                rows = cur.fetchall() or []
+                cur.close()
+
+                items = []
+                for row in rows:
+                    items.append({
+                        'id': row['id'],
+                        'name': row['name'],
+                        'description': (row['description'] or '')[:160],
+                        'preview_image': row['preview_image'] or '',
+                        'pricing_type': row['pricing_type'] or 'free',
+                        'price': float(row['price'] or 0),
+                        'vip_free': bool(row.get('vip_free') or False),
+                        'purchase_count': int(row['purchase_count'] or 0),
+                        'avg_rating': float(row['avg_rating'] or 0),
+                        'rating_count': int(row['rating_count'] or 0),
+                        'view_count': int(row['view_count'] or 0),
+                        'review_status': row.get('review_status') or 'approved',
+                        'review_note': row.get('review_note') or '',
+                        'revenue': float(row.get('revenue') or 0),
+                        'created_at': row['created_at'].isoformat() if row.get('created_at') else None,
+                        'updated_at': row['updated_at'].isoformat() if row.get('updated_at') else None,
+                    })
+
+                return {
+                    'items': items,
+                    'total': total,
+                    'page': page,
+                    'page_size': page_size,
+                    'total_pages': (total + page_size - 1) // page_size if total > 0 else 0,
+                }
+        except Exception as e:
+            logger.error(f"get_author_published failed: {e}")
+            return {'items': [], 'total': 0, 'page': 1, 'page_size': page_size, 'total_pages': 0}
+
+    def get_author_sales(
+        self,
+        user_id: int,
+        page: int = 1,
+        page_size: int = 20,
+        indicator_id: Optional[int] = None,
+    ) -> Dict[str, Any]:
+        """获取作者「销售明细」(按购买记录 by 用户为 seller_id)。
+
+        可选 indicator_id 过滤：只看某一个指标的销售记录。
+        """
+        offset = (max(page, 1) - 1) * page_size
+        try:
+            with get_db_connection() as db:
+                cur = db.cursor()
+
+                where = ["p.seller_id = ?"]
+                params: List[Any] = [user_id]
+                if indicator_id:
+                    where.append("p.indicator_id = ?")
+                    params.append(indicator_id)
+                where_sql = " AND ".join(where)
+
+                cur.execute(
+                    f"SELECT COUNT(*) AS count FROM qd_indicator_purchases p WHERE {where_sql}",
+                    tuple(params),
+                )
+                total = int((cur.fetchone() or {}).get('count') or 0)
+
+                cur.execute(
+                    f"""
+                    SELECT
+                        p.id          AS purchase_id,
+                        p.indicator_id,
+                        p.buyer_id,
+                        p.price       AS purchase_price,
+                        p.created_at  AS purchase_time,
+                        i.name        AS indicator_name,
+                        i.pricing_type,
+                        u.nickname    AS buyer_nickname,
+                        u.avatar      AS buyer_avatar
+                    FROM qd_indicator_purchases p
+                    LEFT JOIN qd_indicator_codes i ON p.indicator_id = i.id
+                    LEFT JOIN qd_users           u ON p.buyer_id     = u.id
+                    WHERE {where_sql}
+                    ORDER BY p.created_at DESC
+                    LIMIT ? OFFSET ?
+                    """,
+                    tuple(params + [page_size, offset]),
+                )
+                rows = cur.fetchall() or []
+                cur.close()
+
+                items = []
+                for row in rows:
+                    items.append({
+                        'purchase_id': row['purchase_id'],
+                        'indicator_id': row['indicator_id'],
+                        'indicator_name': row['indicator_name'] or '',
+                        'pricing_type': row.get('pricing_type') or 'free',
+                        'price': float(row['purchase_price'] or 0),
+                        'purchase_time': row['purchase_time'].isoformat() if row.get('purchase_time') else None,
+                        'buyer': {
+                            'id': row['buyer_id'],
+                            'nickname': row['buyer_nickname'] or '',
+                            'avatar': row['buyer_avatar'] or '/avatar2.jpg',
+                        },
+                    })
+
+                return {
+                    'items': items,
+                    'total': total,
+                    'page': page,
+                    'page_size': page_size,
+                    'total_pages': (total + page_size - 1) // page_size if total > 0 else 0,
+                }
+        except Exception as e:
+            logger.error(f"get_author_sales failed: {e}")
+            return {'items': [], 'total': 0, 'page': 1, 'page_size': page_size, 'total_pages': 0}
+
     # ==========================================
     # 评论功能
     # ==========================================

@@ -24,6 +24,10 @@ from app.utils.db import get_db_connection
 from app.utils.logger import get_logger
 from app.utils.auth import login_required
 from app.services.indicator_params import IndicatorCaller, IndicatorParamsParser
+from app.services.indicator_translator import (
+    translate_indicator,
+    SUPPORTED_LANGUAGES as _SUPPORTED_LANGUAGES_FOR_TRANSLATE,
+)
 import requests
 
 logger = get_logger(__name__)
@@ -557,6 +561,10 @@ def save_indicator():
             # Best-effort schema upgrade for VIP-free indicators
             try:
                 cur.execute("ALTER TABLE qd_indicator_codes ADD COLUMN IF NOT EXISTS vip_free BOOLEAN DEFAULT FALSE")
+                # i18n columns (see services/indicator_translator.py)
+                cur.execute("ALTER TABLE qd_indicator_codes ADD COLUMN IF NOT EXISTS source_language VARCHAR(16)")
+                cur.execute("ALTER TABLE qd_indicator_codes ADD COLUMN IF NOT EXISTS name_i18n JSONB")
+                cur.execute("ALTER TABLE qd_indicator_codes ADD COLUMN IF NOT EXISTS description_i18n JSONB")
             except Exception:
                 pass
             # 市场购买的副本不可改库中源码：应「另存为」新建 is_buy=0 的指标再编辑
@@ -646,6 +654,57 @@ def save_indicator():
                 indicator_id = int(cur.lastrowid or 0)
             db.commit()
             cur.close()
+
+        # ============================================================
+        # 多语言：发布到指标市场时同步触发 LLM 翻译
+        # ============================================================
+        # 设计取舍：
+        #   - 仅在 publish_to_community=1 时才翻译，私有指标不浪费 LLM 额度。
+        #   - 同步阻塞（一次调用约 2-5s）。如果以后 P99 超过用户耐心，可改成
+        #     后台 worker；现在保持同步是为了「保存成功 = 全语言立即可见」
+        #     最简单的 UX 契约。
+        #   - 翻译失败不会让保存失败：translate_indicator 内部 try/except，
+        #     返回 (None, None, src) 时下游接口仍能 fallback 到原文。
+        if publish_to_community and indicator_id > 0:
+            try:
+                ui_lang = (
+                    request.headers.get('X-App-Lang')
+                    or request.headers.get('Accept-Language', '').split(',')[0].strip()
+                    or 'en-US'
+                )
+                if ui_lang not in _SUPPORTED_LANGUAGES_FOR_TRANSLATE:
+                    ui_lang = None  # let translator auto-detect
+
+                name_i18n, desc_i18n, src_lang = translate_indicator(
+                    name=name,
+                    description=description,
+                    source_language=ui_lang,
+                )
+
+                with get_db_connection() as db:
+                    cur = db.cursor()
+                    cur.execute(
+                        """
+                        UPDATE qd_indicator_codes
+                        SET source_language = ?,
+                            name_i18n = ?,
+                            description_i18n = ?,
+                            updated_at = NOW()
+                        WHERE id = ? AND user_id = ?
+                        """,
+                        (
+                            src_lang,
+                            json.dumps(name_i18n, ensure_ascii=False) if name_i18n else None,
+                            json.dumps(desc_i18n, ensure_ascii=False) if desc_i18n else None,
+                            indicator_id,
+                            user_id,
+                        ),
+                    )
+                    db.commit()
+                    cur.close()
+            except Exception as _e:
+                # 翻译是 nice-to-have，永远不能让 save_indicator 失败。
+                logger.warning(f"save_indicator: i18n translation skipped: {_e}")
 
         return jsonify({"code": 1, "msg": "success", "data": {"id": indicator_id, "userid": user_id}})
     except Exception as e:

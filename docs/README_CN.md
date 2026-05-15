@@ -46,7 +46,7 @@
 
   <p style="margin-top: 1.45rem; margin-bottom: 10px;">
     <a href="../LICENSE"><img src="https://img.shields.io/badge/License-Apache%202.0-blue.svg?style=flat-square&logo=apache" alt="License"></a>
-    <img src="https://img.shields.io/badge/Version-3.0.5-orange?style=flat-square" alt="Version">
+    <img src="https://img.shields.io/badge/Version-3.0.7-orange?style=flat-square" alt="Version">
     <img src="https://img.shields.io/badge/Python-3.10%2B%20%7C%20Docker%20镜像%203.12-3776AB?style=flat-square&logo=python&logoColor=white" alt="Python">
     <img src="https://img.shields.io/badge/Docker-Compose%20Ready-2496ED?style=flat-square&logo=docker&logoColor=white" alt="Docker">
     <img src="https://img.shields.io/badge/Frontend-预构建-1f8b4c?style=flat-square" alt="Frontend">
@@ -80,19 +80,20 @@
 
 ## 两分钟试用
 
+> **三步：`git clone → 写一个密钥 → docker compose up`。** macOS/Linux 就是**一行命令**。下文 90% 都是参考详情，新手不用全读。
+
 **前置条件：** 已安装带 Compose 的 [Docker](https://docs.docker.com/get-docker/)（Windows/macOS 用 Docker Desktop，Linux 用 Docker Engine + Compose 插件）以及 **Git**。**不需要安装 Node.js**（仓库已含 `frontend/dist` 预构建前端）。
 
-### macOS / Linux（Bash）
-
-一行命令（也可拆成多步执行）：
+### macOS / Linux（Bash）—— 一行命令
 
 ```bash
 git clone https://github.com/brokermr810/QuantDinger.git && cd QuantDinger && cp backend_api_python/env.example backend_api_python/.env && chmod +x scripts/generate-secret-key.sh && ./scripts/generate-secret-key.sh && docker-compose up -d --build
 ```
 
-若提示脚本不可执行，先执行 `chmod +x scripts/generate-secret-key.sh` 再重试。若系统没有 `docker-compose` 命令，可尝试 `docker compose`（Compose V2）。
+若系统没有 `docker-compose` 命令，可尝试 `docker compose`（Compose V2）。
 
-### Windows（PowerShell）
+<details>
+<summary><b>Windows（PowerShell）</b> —— 点击展开</summary>
 
 请在 **PowerShell**（不要用 CMD）中操作，并先启动 **Docker Desktop**（建议开启 WSL2 后端）。
 
@@ -110,13 +111,15 @@ docker-compose up -d --build
 
 若提示找不到 `docker-compose`，请改用 **`docker compose`**（中间为空格）。若未安装 Git，请安装 [Git for Windows](https://git-scm.com/download/win)。
 
-### Windows 备选：Git Bash
+**更简单的办法：** 若已安装 **Git for Windows**，打开 **Git Bash**，直接复制上方 macOS/Linux 的一行命令即可，无需手写 PowerShell。
 
-若已安装 **Git for Windows**，打开 **Git Bash**，可直接复制上方 **macOS / Linux** 的 Bash 一行命令（含 `./scripts/generate-secret-key.sh`），无需手写 PowerShell。
+</details>
 
 ---
 
-启动后打开 **`http://localhost:8888`**，使用 **`quantdinger` / `123456`** 登录，并在任何真实业务前**修改默认管理员密码**。环境要求、逐项配置、首次自检与排错，请继续阅读下文 **[安装与首次运行](#安装与首次运行)**。
+启动后打开 **`http://localhost:8888`**，使用 **`quantdinger` / `123456`** 登录，并在任何真实业务前**修改默认管理员密码**。完事——可以开始用了。
+
+需要逐项配置、首次自检、排错说明，再去看下文 **[安装与首次运行](#安装与首次运行)**（其他人可跳过）。
 
 ## 相关仓库
 
@@ -130,94 +133,28 @@ docker-compose up -d --build
 
 **说明：** 只有从 **QuantDinger-Vue** 自行构建 Web 时才需要 Node.js；默认 Docker 快速上手不需要。
 
-<h2 id="mcp-agent-gateway">MCP 与 Agent 网关</h2>
+<h2 id="mcp-agent-gateway">用 AI Agent 接入（Cursor / Claude Code / Codex / MCP）</h2>
 
-面向 **Cursor / Claude Code / Codex / OpenClaw / NanoBot** 等客户端；协议为 **Model Context Protocol（MCP）**。
+QuantDinger 自带 **Agent Gateway**（`/api/agent/v1`）和已发布到 PyPI 的轻量 **MCP 服务器**（[`quantdinger-mcp`](https://pypi.org/project/quantdinger-mcp/)）。签发一个 token，AI 客户端即可读行情、跑回测、管理策略，并按默认纸面规则下单——**不会接触你的交易所密钥与管理员 JWT**。
 
-QuantDinger 自带 **Agent Gateway**（`/api/agent/v1`）和一个轻量 **MCP 服务器**，把行情、策略、回测、纸面交易等能力封装成 MCP 工具。管理员签发 token 后，Agent 即可做研究、跑回测、管理策略——**不会接触你的交易所密钥与管理员 JWT**。
+> 两条永远不退让的安全红线：每次 Agent 调用都会**写入审计日志**；交易类 token **默认仅纸面**，实盘需要服务器端 `AGENT_LIVE_TRADING_ENABLED=true` 与 token 上 `paper_only=false` **同时**满足。
 
-> 两条永远不退让的安全红线：每一次 Agent 调用都会**写入审计日志**；交易类（T）token **默认仅纸面**，需要服务器端 `AGENT_LIVE_TRADING_ENABLED=true` 与 token 上 `paper_only=false` 同时满足才可能走真实交易所。
+**两套后端，客户端配置一模一样——只是 `QUANTDINGER_BASE_URL` 不同：**
 
-### 第 1 步 — 拿一个 Agent token（两条路自选）
+- **云端（30 秒上手）** —— 在 [ai.quantdinger.com](https://ai.quantdinger.com) 注册 → **侧栏 → Agent Tokens** → 签发。锁死 `paper_only=true`，永远不会触达真实交易所。
+- **自托管（本仓库）** —— 按上面 [两分钟试用](#两分钟试用) 跑起来，打开 `http://localhost:8888/#/agent-tokens`。你自己决定 scopes、白名单、速率限制、实盘开关。
 
-第 2 步的 MCP 接入和后续提示词**两条路完全一样**，只有 `QUANTDINGER_BASE_URL` 的值不同。
-
-**路线 A · 云端 SaaS（[ai.quantdinger.com](https://ai.quantdinger.com)），30 秒上手。** 注册后打开 **侧栏 → Agent Tokens** → **签发**。SaaS 实例**强制锁死** `paper_only=true`，并在签发环节**拒绝任何带 T（Trading）scope 的 token**——Agent 可以读行情、在你自己的租户内管理策略、跑回测，**但永远不会触达真实交易所**。`QUANTDINGER_BASE_URL=https://ai.quantdinger.com`。适合：在 Cursor / Claude Code 里 0 安装试 QuantDinger；写文章 / 做演示；用共享数据集做研究。
-
-**路线 B · 自托管（本仓库），生产 / 私有数据 / 实盘。** 先按上面 [两分钟试用](#两分钟试用) 跑起来，用管理员登录，打开 **侧栏 → Agent Tokens**（或直接 `http://localhost:8888/#/agent-tokens`）。你自己决定 scopes（含 **T**）、市场/品种白名单、速率限制、要不要把 `AGENT_LIVE_TRADING_ENABLED=true` 打开。`QUANTDINGER_BASE_URL=http://localhost:8888`（或你局域网 URL）。适合：有自己交易所 Key 的；有私有策略/数据的；VPN 后面的团队；以及任何**最终想做实盘**的人。
-
-不管走哪条：
-
-1. 点 **签发** → 起个名字（`cursor-mcp`、`claude-research`……）。
-2. 选 scope —— 从 **R + B**（读 + 回测）起步；让 Agent 能创建/修改策略再加 **W**。
-3. 立刻复制 token —— 完整字符串只显示一次，库里只存 SHA-256 哈希，丢了只能撤销重签。
-
-更喜欢命令行？看 [`docs/agent/AGENT_QUICKSTART.md`](agent/AGENT_QUICKSTART.md) 里的等价 `curl` 示例。
-
-### 第 2 步 — 把 MCP 服务器接到你的 AI 客户端
-
-MCP 服务器在 [`mcp_server/`](../mcp_server/)，提供两种 transport，覆盖几乎所有客户端：
-
-**A. 本地 stdio（Cursor、Claude Code、Codex 桌面端等）** —— MCP 服务器已发布到 PyPI（[`quantdinger-mcp`](https://pypi.org/project/quantdinger-mcp/)）。把下面这段写到 `.cursor/mcp.json`、`~/.config/claude/claude_desktop_config.json` 或对应客户端的配置文件（直接复制模板：[`docs/agent/cursor-mcp.example.json`](agent/cursor-mcp.example.json)）：
+然后把下面的 JSON 写到 Cursor / Claude Code / Codex 的 MCP 配置文件（`.cursor/mcp.json` 模板：[`docs/agent/cursor-mcp.example.json`](agent/cursor-mcp.example.json)）：
 
 ```json
-{
-  "mcpServers": {
-    "quantdinger": {
-      "command": "uvx",
-      "args": ["quantdinger-mcp"],
-      "env": {
-        "QUANTDINGER_BASE_URL":    "http://localhost:8888",
-        "QUANTDINGER_AGENT_TOKEN": "qd_agent_xxxxxxxx"
-      }
-    }
-  }
-}
+{ "mcpServers": { "quantdinger": {
+  "command": "uvx", "args": ["quantdinger-mcp"],
+  "env": { "QUANTDINGER_BASE_URL": "http://localhost:8888",
+           "QUANTDINGER_AGENT_TOKEN": "qd_agent_xxxxxxxx" }
+} } }
 ```
 
-`uvx`（[安装 uv](https://docs.astral.sh/uv/getting-started/installation/)）首次运行会自动下载并缓存包，**无需自己管理虚拟环境**。如果习惯 pip：
-
-```bash
-pip install quantdinger-mcp
-# 然后改成 {"command": "quantdinger-mcp", "args": []}
-```
-
-Claude Code 命令行一键写入：
-
-```bash
-claude mcp add quantdinger \
-  --env QUANTDINGER_BASE_URL=http://localhost:8888 \
-  --env QUANTDINGER_AGENT_TOKEN=qd_agent_xxxxxxxx \
-  -- uvx quantdinger-mcp
-```
-
-**B. 远程 HTTP（OpenClaw / NanoBot 这类云端 Agent、浏览器 IDE、所有不能 spawn 子进程的客户端）** —— 把 MCP 当长服务跑起来，客户端按 URL 接：
-
-```bash
-QUANTDINGER_BASE_URL=https://your-host \
-QUANTDINGER_AGENT_TOKEN=qd_agent_xxxxxxxx \
-QUANTDINGER_MCP_TRANSPORT=streamable-http \
-QUANTDINGER_MCP_HOST=0.0.0.0 \
-QUANTDINGER_MCP_PORT=7800 \
-quantdinger-mcp
-# 客户端连 http://your-host:7800
-```
-
-只支持旧版 SSE 协议的客户端把 transport 改成 `sse` 即可。生产环境务必前置反向代理做 TLS + IP 白名单，**只让带 Agent token 的客户端进来**。
-
-### 第 3 步 — 直接在 Agent 里下指令
-
-重启 IDE，然后试着说：
-
-- *"给我拉 BTC/USDT 最近 90 根日线，跑一下 regime detector，告诉我现在是哪种行情。"*
-- *"在 2024-01-01 到 2024-06-30 区间，用 4h 周期回测 20/60 SMA 金叉策略，**边跑边把结果流给我看**。"*
-- *"建一个叫 **eth-trend-bot** 的策略，用我刚刚写的指标，先保持 `stopped` 状态。"*
-
-长任务（`/api/agent/v1/jobs/{id}/stream`）走 SSE，Agent 不需要轮询就能拿到每一轮回测的中间结果。所有调用都会出现在 **Agent Tokens → Audit log**：路由、scope 类别、状态码、耗时一目了然。
-
-### 用 QuantDinger 做 *写代码* 的 Agent 上下文？
-
-如果你拿 Cursor / Claude Code / Codex 来**改这个仓库**，仓库里也准备了 [`.cursor/skills/quantdinger-agent-workflow/SKILL.md`](../.cursor/skills/quantdinger-agent-workflow/SKILL.md)，把 Agent Gateway 的内部结构、红线（不准提交密钥、默认纸面）、改动后怎么验证都讲清楚了；完整的「三层契约」模型见 [`docs/agent/AGENT_ENVIRONMENT_DESIGN.md`](agent/AGENT_ENVIRONMENT_DESIGN.md)。
+**完整接入教程** —— 本地 stdio 配置、远程 HTTP transport、Claude Code 命令行、Agent 提示词样例、审计日志说明，全部在：**[`docs/agent/MCP_SETUP.md`](agent/MCP_SETUP.md)**。
 
 更深入：[AI 集成设计](agent/AI_INTEGRATION_DESIGN.md) · [`curl` 快速开始](agent/AGENT_QUICKSTART.md) · [OpenAPI 3.0 契约](agent/agent-openapi.json) · [MCP 服务器 README](../mcp_server/README.md)
 
@@ -333,7 +270,7 @@ flowchart LR
 
 ## 安装与首次运行
 
-**最快路径：** 先完成上文 [两分钟试用](#两分钟试用)。本节是**完整检查清单**（结果相同，步骤更细）。
+> **已经按 [两分钟试用](#两分钟试用) 跑起来了？** 直接跳过本节——只是把同样的流程拆成给首次部署、想搞懂每个配置项的人看的逐步清单。
 
 下文对应常见「本地部署」顺序：**准备宿主机 → 拉代码 → 配密钥 → 起栈 → 自检 → 加固 → 可选接入大模型**。**不需要 Node.js**：前端已预构建在 `frontend/dist`，由 `frontend` 容器内 Nginx 提供。
 
@@ -396,7 +333,7 @@ docker compose -f docker-compose.ghcr.yml up -d
 后端 entrypoint 会在首次启动时自动生成随机 `SECRET_KEY` 并幂等地应用 `migrations/init.sql`。编辑 `backend.env` 用于持久化覆盖（API 密钥、OAuth、券商凭据等）。编排参数（pin 版本、换镜像源等）放在独立的 `.env`（可选）：
 
 ```env
-IMAGE_TAG=v3.0.6
+IMAGE_TAG=v3.0.7
 # BACKEND_IMAGE=ghcr.io/<你的fork>/quantdinger-backend     # 可选，用于 fork
 # FRONTEND_IMAGE=ghcr.io/<你的fork>/quantdinger-frontend
 ```
