@@ -381,6 +381,26 @@ docker-compose up -d --build
 
 Services: **`postgres`**, **`redis`**, **`backend`**, **`frontend`** (see `docker-compose.yml` for healthchecks and port mappings).
 
+#### Alternative: zero-repo install from GHCR
+
+If you do not want to clone the repository, the GHCR variant pulls prebuilt multi-arch (amd64/arm64) images for both backend and frontend:
+
+```bash
+curl -O https://raw.githubusercontent.com/brokermr810/QuantDinger/main/docker-compose.ghcr.yml
+curl -o backend.env https://raw.githubusercontent.com/brokermr810/QuantDinger/main/backend_api_python/env.example
+docker compose -f docker-compose.ghcr.yml up -d
+```
+
+The backend entrypoint auto-generates a random `SECRET_KEY` on first start and applies the schema (`migrations/init.sql`) idempotently. Edit `backend.env` for persistent overrides (API keys, OAuth, broker credentials). Compose orchestration knobs go in a separate `.env` (optional) — e.g. pin a version:
+
+```env
+IMAGE_TAG=v3.0.6
+# BACKEND_IMAGE=ghcr.io/<your-fork>/quantdinger-backend     # optional, for forks
+# FRONTEND_IMAGE=ghcr.io/<your-fork>/quantdinger-frontend
+```
+
+Defaults: `ghcr.io/brokermr810/quantdinger-backend:latest` + `ghcr.io/brokermr810/quantdinger-frontend:latest`.
+
 ### 5) Verify and sign in
 
 | Check | URL / command |

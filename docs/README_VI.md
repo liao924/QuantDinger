@@ -200,6 +200,13 @@ flowchart LR
 1. Clone rồi `cp backend_api_python/env.example backend_api_python/.env`
 2. **Phải đặt `SECRET_KEY`** (giữ placeholder thì backend không khởi động). Linux/macOS: `./scripts/generate-secret-key.sh`
 3. `docker-compose up -d --build`
+   - **Tùy chọn (không cần clone repo)**: kéo image backend + frontend đa kiến trúc (amd64/arm64) sẵn từ GHCR:
+     ```bash
+     curl -O https://raw.githubusercontent.com/brokermr810/QuantDinger/main/docker-compose.ghcr.yml
+     curl -o backend.env https://raw.githubusercontent.com/brokermr810/QuantDinger/main/backend_api_python/env.example
+     docker compose -f docker-compose.ghcr.yml up -d
+     ```
+     Image mặc định: `ghcr.io/brokermr810/quantdinger-{backend,frontend}:latest`. Ghim phiên bản bằng `IMAGE_TAG=v3.0.6` trong `.env` cục bộ.
 4. **Web:** `http://localhost:8888` · **Sức khỏe API:** `http://localhost:5000/api/health`
 5. Đổi mật khẩu quản trị mặc định trước production. Đặt **`FRONTEND_URL`** trong `backend_api_python/.env` đúng URL thực tế.
 

@@ -1,31 +1,33 @@
-# QuantDinger Docker Compose - One-Click Deployment
-# Usage:
-#   1. Copy env.example to .env and edit your settings
-#      cp backend_api_python/env.example backend_api_python/.env
-#   2. IMPORTANT: Generate and set a secure SECRET_KEY in backend_api_python/.env
-#      SECRET_KEY=$(python3 -c "import secrets; print(secrets.token_hex(32))")
-#      Or edit backend_api_python/.env and replace SECRET_KEY value
-#   3. docker-compose up -d --build
-#   4. Open http://localhost:8888
+# QuantDinger Docker Compose - GHCR prebuilt images (zero-repo deploy)
 #
-# Frontend image: nginx serving prebuilt files from `frontend/dist` only.
-# Vue source is maintained separately; build there and sync dist into this repo.
+# Pulls both backend and frontend images from GitHub Container Registry. The
+# repository does NOT need to be cloned — only this file (plus a backend.env
+# for runtime config) is required.
 #
-# Note: The container will NOT start if SECRET_KEY is using the default value.
-#       This is a security measure to prevent insecure deployments.
+# Minimal install (Linux / macOS):
 #
-# Docker image sources:
-#   Default uses official Docker Hub images.
-#   To switch source globally, set a single `IMAGE_PREFIX` in project-root `.env`.
-#   Examples: empty (official), `docker.m.daocloud.io/library/`,
-#   `docker.xuanyuan.me/library/`.
-# Backend Dockerfile tries Aliyun apt/PyPI first and falls back to official (no extra env).
-# For slow pulls of base images, optionally set IMAGE_PREFIX or Docker Engine registry-mirrors.
+#   curl -O https://raw.githubusercontent.com/brokermr810/QuantDinger/main/docker-compose.ghcr.yml
+#   curl -o backend.env https://raw.githubusercontent.com/brokermr810/QuantDinger/main/backend_api_python/env.example
+#   docker compose -f docker-compose.ghcr.yml up -d
+#   # open http://localhost:8888  (login: quantdinger / 123456)
+#
+# Two-file separation of concerns:
+#   - backend.env   — backend runtime config (SECRET_KEY, API keys, broker creds, ...);
+#                     bind-mounted into the backend container as /app/.env
+#   - .env (optional) — docker compose orchestration knobs (IMAGE_TAG, ports, mirrors);
+#                       read by `docker compose` itself for ${VAR} substitution
+#
+# Database schema is bootstrapped automatically: the backend re-applies
+# `migrations/init.sql` idempotently on every start, so no host-side SQL
+# mount is needed (unlike docker-compose.yml).
+#
+# Orchestration override knobs (project-root .env, all optional):
+#   IMAGE_TAG       - backend & frontend tag (default: latest)
+#   BACKEND_IMAGE   - backend image path  (default: ghcr.io/brokermr810/quantdinger-backend)
+#   FRONTEND_IMAGE  - frontend image path (default: ghcr.io/brokermr810/quantdinger-frontend)
+#   IMAGE_PREFIX    - postgres/redis registry prefix (e.g. docker.m.daocloud.io/library/)
 
 services:
-  # ========================
-  # PostgreSQL Database
-  # ========================
   postgres:
     image: ${IMAGE_PREFIX:-}postgres:16-alpine
     container_name: quantdinger-db
@@ -35,9 +37,6 @@ services:
       POSTGRES_USER: ${POSTGRES_USER:-quantdinger}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-quantdinger123}
       TZ: ${TZ:-Asia/Shanghai}
-    # Raise PostgreSQL's max_connections so the backend pool (default
-    # DB_POOL_MAX=50) plus psql/admin connections never exceed PG's own
-    # limit.  PG default is 100; 150 gives headroom for future scaling.
     command:
       - "postgres"
       - "-c"
@@ -46,7 +45,6 @@ services:
       - "shared_buffers=${PG_SHARED_BUFFERS:-256MB}"
     volumes:
       - postgres_data:/var/lib/postgresql/data
-      - ./backend_api_python/migrations/init.sql:/docker-entrypoint-initdb.d/01-init.sql
     ports:
       - "${DB_PORT:-127.0.0.1:5432}:5432"
     networks:
@@ -57,9 +55,6 @@ services:
       timeout: 5s
       retries: 5
 
-  # ========================
-  # Redis (optional cache layer)
-  # ========================
   redis:
     image: ${IMAGE_PREFIX:-}redis:7-alpine
     container_name: quantdinger-redis
@@ -75,18 +70,8 @@ services:
       timeout: 5s
       retries: 5
 
-  # ========================
-  # Backend API (Python/Flask)
-  # ========================
   backend:
-    build:
-      context: ./backend_api_python
-      dockerfile: Dockerfile
-      args:
-        BASE_IMAGE: ${IMAGE_PREFIX:-}python:3.12-slim-bookworm
-        # cn (default): use Aliyun apt/PyPI mirrors with fallback to official.
-        # global: use official sources directly (recommended for overseas builds).
-        BUILD_REGION: ${BUILD_REGION:-cn}
+    image: ${BACKEND_IMAGE:-ghcr.io/brokermr810/quantdinger-backend}:${IMAGE_TAG:-latest}
     container_name: quantdinger-backend
     restart: unless-stopped
     depends_on:
@@ -99,8 +84,12 @@ services:
     volumes:
       - backend_logs:/app/logs
       - backend_data:/app/data
-      # Mount .env for runtime config and admin-panel updates
-      - ./backend_api_python/.env:/app/.env
+      # Backend runtime config. Must exist as a *file* on the host — if missing,
+      # docker silently creates a directory at the mount target and shadows
+      # /app/.env. The entrypoint will auto-generate SECRET_KEY on first start
+      # and write it back through the bind mount, so the host file gets the
+      # generated key persistently.
+      - ./backend.env:/app/.env
     environment:
       - PYTHON_API_HOST=0.0.0.0
       - PYTHON_API_PORT=5000
@@ -110,20 +99,14 @@ services:
       - REDIS_HOST=redis
       - REDIS_PORT=6379
       - CACHE_ENABLED=true
-      # Database connection pool tuning (see app/utils/db_postgres.py).
-      # Defaults are safe for ~50 concurrent DB users; raise if you run many
-      # bots or see `connection pool exhausted` errors.
       - DB_POOL_MIN=${DB_POOL_MIN:-5}
       - DB_POOL_MAX=${DB_POOL_MAX:-50}
       - DB_POOL_ACQUIRE_TIMEOUT=${DB_POOL_ACQUIRE_TIMEOUT:-10}
       - DB_POOL_HEALTH_CHECK=${DB_POOL_HEALTH_CHECK:-true}
-      # Route-level executor tuning (each worker may use one DB connection).
       - MARKET_EXECUTOR_WORKERS=${MARKET_EXECUTOR_WORKERS:-6}
       - PORTFOLIO_EXECUTOR_WORKERS=${PORTFOLIO_EXECUTOR_WORKERS:-3}
-      # Gunicorn concurrency (threads within the single worker process).
       - GUNICORN_WORKERS=${GUNICORN_WORKERS:-1}
       - GUNICORN_THREADS=${GUNICORN_THREADS:-8}
-      # IBKR/MT5 need local TWS or MT5 terminal; set false on SaaS cloud (see env.example).
       - ALLOW_LOCAL_DESKTOP_BROKERS=${ALLOW_LOCAL_DESKTOP_BROKERS:-true}
     networks:
       - quantdinger-network
@@ -133,23 +116,13 @@ services:
       timeout: 10s
       retries: 3
 
-  # ========================
-  # Frontend (Nginx serving prebuilt dist)
-  # ========================
   frontend:
-    build:
-      context: ./frontend
-      dockerfile: Dockerfile
-      args:
-        RUNTIME_IMAGE: ${IMAGE_PREFIX:-}nginx:1.25-alpine
+    image: ${FRONTEND_IMAGE:-ghcr.io/brokermr810/quantdinger-frontend}:${IMAGE_TAG:-latest}
     container_name: quantdinger-frontend
     restart: unless-stopped
     ports:
       - "${FRONTEND_PORT:-8888}:80"
     environment:
-      # nginx envsubst will inject this into the proxy_pass directive at start.
-      # Override with the backend's reachable URL when deploying outside compose
-      # (e.g. Railway: http://${{Backend.RAILWAY_PRIVATE_DOMAIN}}:5000).
       - BACKEND_URL=${BACKEND_URL:-http://backend:5000}
     depends_on:
       - backend

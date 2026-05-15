@@ -383,6 +383,26 @@ docker-compose up -d --build
 
 默认服务：**`postgres`**、**`redis`**、**`backend`**、**`frontend`**（详见仓库根目录 `docker-compose.yml` 与健康检查）。
 
+#### 备选方案：零仓库安装（GHCR 预构建镜像）
+
+如果不想 clone 整个仓库，可使用 GHCR 变体——后端和前端都是预构建的多架构（amd64/arm64）镜像：
+
+```bash
+curl -O https://raw.githubusercontent.com/brokermr810/QuantDinger/main/docker-compose.ghcr.yml
+curl -o backend.env https://raw.githubusercontent.com/brokermr810/QuantDinger/main/backend_api_python/env.example
+docker compose -f docker-compose.ghcr.yml up -d
+```
+
+后端 entrypoint 会在首次启动时自动生成随机 `SECRET_KEY` 并幂等地应用 `migrations/init.sql`。编辑 `backend.env` 用于持久化覆盖（API 密钥、OAuth、券商凭据等）。编排参数（pin 版本、换镜像源等）放在独立的 `.env`（可选）：
+
+```env
+IMAGE_TAG=v3.0.6
+# BACKEND_IMAGE=ghcr.io/<你的fork>/quantdinger-backend     # 可选，用于 fork
+# FRONTEND_IMAGE=ghcr.io/<你的fork>/quantdinger-frontend
+```
+
+默认镜像：`ghcr.io/brokermr810/quantdinger-backend:latest` + `ghcr.io/brokermr810/quantdinger-frontend:latest`。
+
 ### 5）验证与登录
 
 | 检查项 | 地址 / 命令 |
