@@ -3,7 +3,7 @@ name: Publish Docker images to GHCR
 # Build and publish backend + frontend images to GitHub Container Registry.
 #
 # Triggers:
-#   - push of a version tag matching `v*` (e.g. v3.0.7) → publishes semver + latest tags
+#   - push of a version tag matching `v*` (e.g. v3.0.8) → publishes semver + latest tags
 #   - manual workflow_dispatch → publishes only a short-SHA tag for ad-hoc testing
 #
 # Images are built for linux/amd64 and linux/arm64 via QEMU + buildx. The backend

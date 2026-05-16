@@ -1477,6 +1477,32 @@ def get_system_strategies():
 
 # ==================== Admin Orders ====================
 
+
+def _ensure_usdt_admin_columns():
+    """Best-effort: extend qd_usdt_orders with admin-audit columns introduced
+    by the manual-confirm flow. ``ADD COLUMN IF NOT EXISTS`` is idempotent
+    on PostgreSQL, so this is effectively a no-op after the first hit.
+
+    Failures are swallowed (logged at debug level) so a running DB user
+    without DDL privileges doesn't block the read paths — the SELECTs
+    further down use ``information_schema`` checks or COALESCE to tolerate
+    the columns being absent.
+    """
+    try:
+        with get_db_connection() as db:
+            cur = db.cursor()
+            cur.execute(
+                "ALTER TABLE qd_usdt_orders ADD COLUMN IF NOT EXISTS admin_note TEXT DEFAULT NULL"
+            )
+            cur.execute(
+                "ALTER TABLE qd_usdt_orders ADD COLUMN IF NOT EXISTS manual_confirmed_by INTEGER DEFAULT NULL"
+            )
+            db.commit()
+            cur.close()
+    except Exception as exc:
+        logger.debug("ensure_usdt_admin_columns skipped: %s", exc)
+
+
 @user_bp.route('/admin-orders', methods=['GET'])
 @login_required
 @admin_required
@@ -1498,6 +1524,8 @@ def get_admin_orders():
         search = request.args.get('search', '', type=str).strip()
         page_size = min(100, max(1, page_size))
         offset = (page - 1) * page_size
+
+        _ensure_usdt_admin_columns()
 
         with get_db_connection() as db:
             cur = db.cursor()
@@ -1539,6 +1567,9 @@ def get_admin_orders():
                     o.address,
                     o.tx_hash,
                     o.status,
+                    o.matched_via,
+                    o.admin_note,
+                    o.manual_confirmed_by,
                     o.created_at,
                     o.paid_at,
                     o.confirmed_at,
@@ -1590,6 +1621,9 @@ def get_admin_orders():
                 'address': row.get('address') or '',
                 'tx_hash': row.get('tx_hash') or '',
                 'status': row.get('status') or '',
+                'matched_via': row.get('matched_via') or '',
+                'admin_note': row.get('admin_note') or '',
+                'manual_confirmed_by': row.get('manual_confirmed_by'),
                 'created_at': created_at,
                 'paid_at': paid_at,
                 'confirmed_at': confirmed_at,
@@ -1617,6 +1651,167 @@ def get_admin_orders():
         logger.error(f"get_admin_orders failed: {e}")
         import traceback
         logger.error(traceback.format_exc())
+        return jsonify({'code': 0, 'msg': str(e), 'data': None}), 500
+
+
+@user_bp.route('/admin-orders/<int:order_id>/manual-confirm', methods=['POST'])
+@login_required
+@admin_required
+def manual_confirm_order(order_id: int):
+    """
+    Admin-only "rescue" lever for USDT orders.
+
+    Use case: the buyer paid the correct amount to the correct receiving
+    address, but the on-chain reconciler missed the transaction (RPC
+    outage, exotic wallet, chain-specific edge case, off-chain mistake
+    where the customer used a slightly different amount than the order
+    suffix demanded, etc.). Without this endpoint the admin's only option
+    is to ``UPDATE qd_usdt_orders ...`` by hand and then somehow trigger
+    ``purchase_membership``; this surface does both atomically and leaves
+    an audit trail.
+
+    Body:
+        {
+            "tx_hash": "<on-chain tx hash>",     # required
+            "note":    "<free-form audit note>"  # optional
+        }
+
+    Behavior:
+        - Flips the order to 'confirmed'.
+        - Stamps tx_hash + paid_at (if empty) + confirmed_at + admin_note
+          + manual_confirmed_by + matched_via='manual_admin'.
+        - Calls ``purchase_membership`` exactly once per order (idempotent
+          on re-submit — already-confirmed orders only refresh the audit
+          fields, no double-grant).
+        - Refuses ``status='cancelled'`` orders so the admin doesn't
+          accidentally resurrect a deliberately-cancelled refund.
+    """
+    try:
+        admin_user_id = getattr(g, 'user_id', None)
+        body = request.get_json(silent=True) or {}
+        tx_hash = (body.get('tx_hash') or '').strip()
+        note = (body.get('note') or '').strip()
+
+        if not tx_hash:
+            return jsonify({'code': 0, 'msg': 'missing_tx_hash', 'data': None}), 400
+        if len(tx_hash) > 120:
+            return jsonify({'code': 0, 'msg': 'tx_hash_too_long', 'data': None}), 400
+        if len(note) > 1000:
+            return jsonify({'code': 0, 'msg': 'note_too_long', 'data': None}), 400
+
+        _ensure_usdt_admin_columns()
+
+        # Load order in a short read txn (don't hold a lock across the
+        # billing call below — purchase_membership opens its own conn).
+        with get_db_connection() as db:
+            cur = db.cursor()
+            cur.execute(
+                """
+                SELECT id, user_id, plan, status, chain
+                FROM qd_usdt_orders WHERE id = ?
+                """,
+                (order_id,),
+            )
+            order = cur.fetchone()
+            cur.close()
+
+        if not order:
+            return jsonify({'code': 0, 'msg': 'order_not_found', 'data': None}), 404
+
+        current_status = (order.get('status') or '').lower()
+        user_id = order.get('user_id')
+        plan = order.get('plan')
+
+        if current_status == 'cancelled':
+            # Cancelled orders are deliberately retired — surfacing this
+            # as an error forces the admin to recreate the order instead
+            # of silently rescuing a refunded one.
+            return jsonify({
+                'code': 0,
+                'msg': 'order_cancelled',
+                'data': {'order_id': order_id, 'status': current_status},
+            }), 400
+
+        already_confirmed = current_status == 'confirmed'
+
+        # Stamp confirmation + audit fields. COALESCE on paid_at /
+        # confirmed_at means re-running this for amendments (e.g. fix a
+        # typo in the tx hash) preserves the original timestamps.
+        with get_db_connection() as db:
+            cur = db.cursor()
+            cur.execute(
+                """
+                UPDATE qd_usdt_orders
+                SET status = 'confirmed',
+                    tx_hash = ?,
+                    paid_at = COALESCE(paid_at, NOW()),
+                    confirmed_at = COALESCE(confirmed_at, NOW()),
+                    admin_note = ?,
+                    manual_confirmed_by = ?,
+                    matched_via = 'manual_admin',
+                    updated_at = NOW()
+                WHERE id = ?
+                """,
+                (tx_hash, note or None, admin_user_id, order_id),
+            )
+            db.commit()
+            cur.close()
+
+        # Grant membership only when transitioning into 'confirmed' for
+        # the first time — re-submits (already confirmed) should only
+        # update the audit fields above, never grant another membership.
+        billing_msg = ''
+        if not already_confirmed:
+            try:
+                from app.services.billing_service import get_billing_service
+                billing = get_billing_service()
+                ok, billing_msg, _ = billing.purchase_membership(
+                    int(user_id),
+                    str(plan),
+                    record_membership_order=False,
+                    fulfillment_ref=f"manual_usdt:{order_id}:by_{admin_user_id}",
+                )
+                logger.info(
+                    "[ManualConfirm] order=%s user=%s plan=%s admin=%s ok=%s msg=%s",
+                    order_id, user_id, plan, admin_user_id, ok, billing_msg,
+                )
+                if not ok:
+                    # Order row is already 'confirmed' at this point;
+                    # surface the billing error so the admin knows to
+                    # retry / dig in. We deliberately don't roll back the
+                    # status because the on-chain payment IS real.
+                    return jsonify({
+                        'code': 0,
+                        'msg': f'order_confirmed_but_billing_failed:{billing_msg}',
+                        'data': {'order_id': order_id, 'billing_error': billing_msg},
+                    }), 500
+            except Exception as exc:
+                logger.error(
+                    "[ManualConfirm] billing exception order=%s err=%s",
+                    order_id, exc, exc_info=True,
+                )
+                return jsonify({
+                    'code': 0,
+                    'msg': f'order_confirmed_but_billing_exception:{exc}',
+                    'data': {'order_id': order_id},
+                }), 500
+
+        return jsonify({
+            'code': 1,
+            'msg': 'success',
+            'data': {
+                'order_id': order_id,
+                'user_id': user_id,
+                'plan': plan,
+                'status': 'confirmed',
+                'tx_hash': tx_hash,
+                'admin_note': note,
+                'manual_confirmed_by': admin_user_id,
+                'already_confirmed': already_confirmed,
+            },
+        })
+    except Exception as e:
+        logger.error(f"manual_confirm_order failed: {e}", exc_info=True)
         return jsonify({'code': 0, 'msg': str(e), 'data': None}), 500
 
 
