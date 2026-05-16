@@ -466,27 +466,26 @@ class TradingExecutor:
         """
         try:
             with self.lock:
-                if strategy_id not in self.running_strategies:
-                    logger.warning(f"Strategy {strategy_id} is not running")
-                    return False
-                
-                # 标记策略为停止状态
+                had_thread = strategy_id in self.running_strategies
+
+                # Always mark DB stopped (also when auto-stop runs without a live thread).
                 with get_db_connection() as db:
                     cursor = db.cursor()
                     cursor.execute(
                         "UPDATE qd_strategies_trading SET status = 'stopped' WHERE id = %s",
-                        (strategy_id,)
+                        (strategy_id,),
                     )
                     db.commit()
                     cursor.close()
-                
-                # 从运行列表中移除（线程会在下次循环检查状态时退出）
-                del self.running_strategies[strategy_id]
-                self._exchange_fee_cache.pop(strategy_id, None)
-                
-                logger.info(f"Strategy {strategy_id} stopped")
-                self._console_print(f"[strategy:{strategy_id}] stopped (requested)")
-                append_strategy_log(strategy_id, "info", "Strategy stop requested (run flag cleared)")
+
+                if had_thread:
+                    del self.running_strategies[strategy_id]
+                    self._exchange_fee_cache.pop(strategy_id, None)
+                    logger.info(f"Strategy {strategy_id} stopped")
+                    self._console_print(f"[strategy:{strategy_id}] stopped (requested)")
+                    append_strategy_log(strategy_id, "info", "Strategy stop requested (run flag cleared)")
+                else:
+                    logger.info(f"Strategy {strategy_id} marked stopped in DB (no active thread)")
                 return True
                 
         except Exception as e:
@@ -929,11 +928,24 @@ class TradingExecutor:
             # IBKR/MT5 disabled in SaaS/cloud installs.
             if "disabled ibkr/mt5" in m or "已关闭 ibkr / mt5" in msg:
                 return True
+            # Broker gateway not reachable (Docker 127.0.0.1, TWS down, etc.)
+            if any(
+                t in m
+                for t in (
+                    "connection refused",
+                    "connect call failed",
+                    "errno 111",
+                    "failed to connect to ibkr",
+                    "make sure api port on tws",
+                )
+            ):
+                return True
             # Common auth/permission failures (API key expired/invalid).
             fatal_tokens = [
                 "invalid api", "api key", "apikey", "secret", "signature",
                 "authentication", "unauthorized", "forbidden", "permission",
                 "invalid_key", "invalid key",
+                '"code":-2015', "-2015", "50111", "40018",
             ]
             if any(t in m for t in fatal_tokens):
                 return True

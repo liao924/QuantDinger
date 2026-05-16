@@ -39,6 +39,11 @@ from app.services.live_trading.symbols import to_gate_currency_pair
 from app.utils.db import get_db_connection
 from app.utils.logger import get_logger
 from app.utils.strategy_runtime_logs import append_strategy_log
+from app.services.strategy_lifecycle import (
+    auto_stop_live_strategy,
+    is_fatal_exchange_error,
+    should_skip_position_sync,
+)
 
 # Lazy import IBKR to avoid ImportError if ib_insync not installed
 IBKRClient = None
@@ -194,7 +199,9 @@ class PendingOrderWorker:
             logger.debug(f"[PositionSync] Found {len(active_rows)} active live strategies in DB.")
             for _ar in active_rows:
                 _sid = int(_ar.get("id") or 0)
-                if _sid > 0 and _sid not in sid_to_rows:
+                if _sid <= 0 or should_skip_position_sync(_sid):
+                    continue
+                if _sid not in sid_to_rows:
                     if target_strategy_id and target_strategy_id != _sid:
                         continue
                     sid_to_rows[_sid] = []
@@ -204,6 +211,8 @@ class PendingOrderWorker:
         # 2) Reconcile per strategy
         for sid, plist in sid_to_rows.items():
             if target_strategy_id and sid != target_strategy_id:
+                continue
+            if should_skip_position_sync(int(sid)):
                 continue
             try:
                 sc = load_strategy_configs(int(sid))
@@ -272,7 +281,18 @@ class PendingOrderWorker:
                 try:
                     client = create_client(exchange_config, market_type=market_type)
                 except Exception as e:
-                    logger.debug(f"[PositionSync] Strategy {sid} skipped: failed to create client (exchange_id={exchange_id}): {e}")
+                    msg = str(e)
+                    if is_fatal_exchange_error(msg):
+                        logger.error(
+                            "[PositionSync] Strategy %s fatal client error; auto-stopping. error=%s",
+                            sid,
+                            msg,
+                        )
+                        auto_stop_live_strategy(int(sid), msg, source="position_sync_client")
+                    else:
+                        logger.debug(
+                            f"[PositionSync] Strategy {sid} skipped: failed to create client (exchange_id={exchange_id}): {e}"
+                        )
                     continue
                 
                 # Build an "exchange snapshot" per symbol+side
@@ -287,35 +307,9 @@ class PendingOrderWorker:
                         m = msg.lower()
                         # Fatal auth/config errors should auto-stop the strategy to avoid endless spam.
                         # Typical Binance response: HTTP 401 {"code":-2015,"msg":"Invalid API-key, IP, or permissions for action"}
-                        is_fatal_auth = (
-                            "binance http 401" in m
-                            or "invalid api-key" in m
-                            or "invalid api key" in m
-                            or "permissions for action" in m
-                            or '"code":-2015' in m
-                            or "-2015" in m
-                            or "unauthorized" in m
-                            or "forbidden" in m
-                            or "signature" in m
-                        )
-                        if is_fatal_auth:
+                        if is_fatal_exchange_error(msg):
                             logger.error(f"[PositionSync] Strategy {sid} fatal auth error; auto-stopping. error={msg}")
-                            try:
-                                from app.utils.strategy_runtime_logs import append_strategy_log
-                                append_strategy_log(int(sid), "error", f"Auto-stopped: Binance auth failed: {msg}")
-                            except Exception:
-                                pass
-                            try:
-                                with get_db_connection() as db:
-                                    cur = db.cursor()
-                                    cur.execute(
-                                        "UPDATE qd_strategies_trading SET status = 'stopped' WHERE id = %s AND status = 'running'",
-                                        (int(sid),),
-                                    )
-                                    db.commit()
-                                    cur.close()
-                            except Exception:
-                                pass
+                            auto_stop_live_strategy(int(sid), msg, source="position_sync_binance")
                             continue
                         logger.error(f"[PositionSync] Strategy {sid} get_positions failed: {msg}", exc_info=True)
                         continue
@@ -350,33 +344,9 @@ class PendingOrderWorker:
                         # Typical OKX response: HTTP 401 {"msg":"Invalid OK-ACCESS-KEY","code":"50111"}
                         msg = str(e)
                         m = msg.lower()
-                        is_fatal_auth = (
-                            "okx http 401" in m
-                            or "invalid ok-access-key" in m
-                            or '"code":"50111"' in m
-                            or "50111" in m
-                            or "invalid api" in m
-                            or "unauthorized" in m
-                            or "authentication" in m
-                        )
-                        if is_fatal_auth:
+                        if is_fatal_exchange_error(msg):
                             logger.error(f"[PositionSync] Strategy {sid} fatal auth error; auto-stopping. error={msg}")
-                            try:
-                                from app.utils.strategy_runtime_logs import append_strategy_log
-                                append_strategy_log(int(sid), "error", f"Auto-stopped: OKX auth failed: {msg}")
-                            except Exception:
-                                pass
-                            try:
-                                with get_db_connection() as db:
-                                    cur = db.cursor()
-                                    cur.execute(
-                                        "UPDATE qd_strategies_trading SET status = 'stopped' WHERE id = %s AND status = 'running'",
-                                        (int(sid),),
-                                    )
-                                    db.commit()
-                                    cur.close()
-                            except Exception:
-                                pass
+                            auto_stop_live_strategy(int(sid), msg, source="position_sync_okx")
                             continue
                         # Non-fatal: keep syncing other strategies, but don't crash the worker loop.
                         logger.error(f"[PositionSync] Strategy {sid} get_positions failed: {msg}", exc_info=True)
@@ -603,7 +573,16 @@ class PendingOrderWorker:
                     try:
                         positions = client.get_positions() or []
                     except Exception as e:
-                        logger.error(f"[PositionSync] Strategy {sid} IBKR get_positions failed: {e}", exc_info=True)
+                        msg = str(e)
+                        if is_fatal_exchange_error(msg):
+                            logger.error(
+                                "[PositionSync] Strategy %s IBKR fatal error; auto-stopping. error=%s",
+                                sid,
+                                msg,
+                            )
+                            auto_stop_live_strategy(int(sid), msg, source="position_sync_ibkr")
+                        else:
+                            logger.error(f"[PositionSync] Strategy {sid} IBKR get_positions failed: {e}", exc_info=True)
                         continue
                     if isinstance(positions, list):
                         for p in positions:
@@ -794,45 +773,10 @@ class PendingOrderWorker:
                 if to_insert:
                     logger.debug(f"position sync: inserted {len(to_insert)} new positions for strategy_id={sid}")
             except Exception as e:
-                # Any exchange auth/config/connectivity fatal errors should stop the strategy to avoid endless spam.
                 msg = str(e)
-                m = msg.lower()
-                is_fatal = any(tok in m for tok in (
-                    # Generic HTTP auth / permission failures
-                    " http 401",
-                    "unauthorized",
-                    "forbidden",
-                    "invalid api",
-                    "invalid api-key",
-                    "invalid api key",
-                    "invalid_key",
-                    "invalid key",
-                    "signature mismatch",
-                    "invalid_signature",
-                    "permission",
-                    # Common connection failures (IBKR/TWS, local gateways)
-                    "connection refused",
-                    "connect call failed",
-                    "errno 111",
-                ))
-                if is_fatal:
+                if is_fatal_exchange_error(msg):
                     logger.error(f"[PositionSync] Strategy {sid} fatal error; auto-stopping. error={msg}", exc_info=True)
-                    try:
-                        from app.utils.strategy_runtime_logs import append_strategy_log
-                        append_strategy_log(int(sid), "error", f"Auto-stopped: position sync fatal error: {msg}")
-                    except Exception:
-                        pass
-                    try:
-                        with get_db_connection() as db:
-                            cur = db.cursor()
-                            cur.execute(
-                                "UPDATE qd_strategies_trading SET status = 'stopped' WHERE id = %s AND status = 'running'",
-                                (int(sid),),
-                            )
-                            db.commit()
-                            cur.close()
-                    except Exception:
-                        pass
+                    auto_stop_live_strategy(int(sid), msg, source="position_sync")
                 else:
                     logger.error(f"position sync: strategy_id={sid} failed: {e}", exc_info=True)
 
@@ -2424,34 +2368,8 @@ class PendingOrderWorker:
             _console_print(f"[worker] IBKR order exception: strategy_id={strategy_id} pending_id={order_id} err={e}")
             _notify_live_best_effort(status="failed", error=str(e))
             append_strategy_log(strategy_id, "error", f"IBKR order exception ({symbol} {signal_type}): {e}")
-            # Auto-stop strategy on fatal connectivity issues (e.g. TWS/IBG not reachable).
-            try:
-                msg = str(e)
-                m = msg.lower()
-                is_fatal = any(tok in m for tok in (
-                    "connection refused",
-                    "connect call failed",
-                    "errno 111",
-                    "make sure api port on tws",
-                ))
-                if is_fatal:
-                    try:
-                        append_strategy_log(strategy_id, "error", f"Auto-stopped: IBKR connection failed: {msg}")
-                    except Exception:
-                        pass
-                    try:
-                        with get_db_connection() as db:
-                            cur = db.cursor()
-                            cur.execute(
-                                "UPDATE qd_strategies_trading SET status = 'stopped' WHERE id = %s AND status = 'running'",
-                                (int(strategy_id),),
-                            )
-                            db.commit()
-                            cur.close()
-                    except Exception:
-                        pass
-            except Exception:
-                pass
+            if is_fatal_exchange_error(str(e)):
+                auto_stop_live_strategy(int(strategy_id), str(e), source="ibkr_order")
 
     def _execute_alpaca_order(
         self,
