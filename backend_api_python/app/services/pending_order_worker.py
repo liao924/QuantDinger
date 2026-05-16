@@ -1422,23 +1422,6 @@ class PendingOrderWorker:
                 if (not fee_ccy) and ccy:
                     fee_ccy = str(ccy or "")
 
-        def _fetch_fee_best_effort(*, order_id0: str, client_order_id0: str) -> Tuple[float, str]:
-            """
-            Some exchanges (notably Binance) do not expose commissions on order endpoints.
-            We fetch fills and sum commissions best-effort.
-            """
-            oid = str(order_id0 or "").strip()
-            if not oid:
-                return 0.0, ""
-            try:
-                if isinstance(client, BinanceFuturesClient):
-                    return client.get_fee_for_order(symbol=str(symbol), order_id=oid)
-                if isinstance(client, BinanceSpotClient):
-                    return client.get_fee_for_order(symbol=str(symbol), order_id=oid)
-            except Exception:
-                return 0.0, ""
-            return 0.0, ""
-
         def _current_avg() -> float:
             return float(total_quote / total_base) if total_base > 0 else 0.0
 
@@ -2247,9 +2230,11 @@ class PendingOrderWorker:
                     filled=filled,
                     avg_price=avg_price,
                 )
-                # Best-effort: subtract commission from profit if fee is in USDT/USDC/USD.
-                if profit is not None and total_fee > 0 and str(fee_ccy or "").upper() in ("USDT", "USDC", "USD"):
-                    profit = float(profit) - float(total_fee)
+                # ``profit`` = trade P&L from position math (gross).
+                # ``commission`` = fee synced from the exchange fill (see
+                # ``total_fee`` above). Net realised P&L is always
+                # ``profit - commission`` at read/aggregate time — do not
+                # pre-subtract here or dashboards double-count the fee.
                 record_trade(
                     strategy_id=strategy_id,
                     symbol=str(symbol),

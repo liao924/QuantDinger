@@ -46,7 +46,7 @@
 
   <p style="margin-top: 1.45rem; margin-bottom: 10px;">
     <a href="LICENSE"><img src="https://img.shields.io/badge/License-Apache%202.0-blue.svg?style=flat-square&logo=apache" alt="License"></a>
-    <img src="https://img.shields.io/badge/Version-3.0.8-orange?style=flat-square" alt="Version">
+    <img src="https://img.shields.io/badge/Version-3.0.9-orange?style=flat-square" alt="Version">
     <img src="https://img.shields.io/badge/Python-3.10%2B%20%7C%20Docker%20image%203.12-3776AB?style=flat-square&logo=python&logoColor=white" alt="Python">
     <img src="https://img.shields.io/badge/Docker-Compose%20Ready-2496ED?style=flat-square&logo=docker&logoColor=white" alt="Docker">
     <img src="https://img.shields.io/badge/Frontend-Prebuilt-1f8b4c?style=flat-square" alt="Frontend">
@@ -333,7 +333,7 @@ docker compose -f docker-compose.ghcr.yml up -d
 The backend entrypoint auto-generates a random `SECRET_KEY` on first start and applies the schema (`migrations/init.sql`) idempotently. Edit `backend.env` for persistent overrides (API keys, OAuth, broker credentials). Compose orchestration knobs go in a separate `.env` (optional) — e.g. pin a version:
 
 ```env
-IMAGE_TAG=v3.0.8
+IMAGE_TAG=v3.0.9
 # BACKEND_IMAGE=ghcr.io/<your-fork>/quantdinger-backend     # optional, for forks
 # FRONTEND_IMAGE=ghcr.io/<your-fork>/quantdinger-frontend
 ```

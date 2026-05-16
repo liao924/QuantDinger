@@ -1167,7 +1167,7 @@ def get_system_strategies():
         sort_expr_map = {
             'total_pnl': (
                 "(COALESCE((SELECT SUM(unrealized_pnl) FROM qd_strategy_positions p WHERE p.strategy_id = s.id), 0)"
-                " + COALESCE((SELECT SUM(profit) FROM qd_strategy_trades t WHERE t.strategy_id = s.id), 0))"
+                " + COALESCE((SELECT SUM(COALESCE(t.profit, 0) - COALESCE(t.commission, 0)) FROM qd_strategy_trades t WHERE t.strategy_id = s.id), 0))"
             ),
             'trade_count': '(SELECT COUNT(*) FROM qd_strategy_trades t WHERE t.strategy_id = s.id)',
             'position_count': '(SELECT COUNT(*) FROM qd_strategy_positions p WHERE p.strategy_id = s.id)',
@@ -1284,7 +1284,7 @@ def get_system_strategies():
                     f"""
                     SELECT strategy_id, 
                            COUNT(*) as trade_count, 
-                           COALESCE(SUM(profit), 0) as total_realized_pnl
+                           COALESCE(SUM(COALESCE(profit, 0) - COALESCE(commission, 0)), 0) as total_realized_pnl
                     FROM qd_strategy_trades
                     WHERE strategy_id IN ({placeholders})
                     GROUP BY strategy_id
@@ -1425,9 +1425,9 @@ def get_system_strategies():
 
             # Aggregate realized pnl from trade history.
             realized_sql = f"""
-                SELECT COALESCE(SUM(t.profit), 0) AS total_realized,
-                       COALESCE(SUM(CASE WHEN s.execution_mode = 'live' THEN t.profit ELSE 0 END), 0) AS live_realized,
-                       COALESCE(SUM(CASE WHEN s.execution_mode = 'signal' THEN t.profit ELSE 0 END), 0) AS signal_realized
+                SELECT COALESCE(SUM(COALESCE(t.profit, 0) - COALESCE(t.commission, 0)), 0) AS total_realized,
+                       COALESCE(SUM(CASE WHEN s.execution_mode = 'live' THEN COALESCE(t.profit, 0) - COALESCE(t.commission, 0) ELSE 0 END), 0) AS live_realized,
+                       COALESCE(SUM(CASE WHEN s.execution_mode = 'signal' THEN COALESCE(t.profit, 0) - COALESCE(t.commission, 0) ELSE 0 END), 0) AS signal_realized
                 FROM qd_strategy_trades t
                 JOIN qd_strategies_trading s ON s.id = t.strategy_id
                 LEFT JOIN qd_users u ON u.id = s.user_id

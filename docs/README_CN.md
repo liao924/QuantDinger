@@ -46,7 +46,7 @@
 
   <p style="margin-top: 1.45rem; margin-bottom: 10px;">
     <a href="../LICENSE"><img src="https://img.shields.io/badge/License-Apache%202.0-blue.svg?style=flat-square&logo=apache" alt="License"></a>
-    <img src="https://img.shields.io/badge/Version-3.0.8-orange?style=flat-square" alt="Version">
+    <img src="https://img.shields.io/badge/Version-3.0.9-orange?style=flat-square" alt="Version">
     <img src="https://img.shields.io/badge/Python-3.10%2B%20%7C%20Docker%20镜像%203.12-3776AB?style=flat-square&logo=python&logoColor=white" alt="Python">
     <img src="https://img.shields.io/badge/Docker-Compose%20Ready-2496ED?style=flat-square&logo=docker&logoColor=white" alt="Docker">
     <img src="https://img.shields.io/badge/Frontend-预构建-1f8b4c?style=flat-square" alt="Frontend">
@@ -333,7 +333,7 @@ docker compose -f docker-compose.ghcr.yml up -d
 后端 entrypoint 会在首次启动时自动生成随机 `SECRET_KEY` 并幂等地应用 `migrations/init.sql`。编辑 `backend.env` 用于持久化覆盖（API 密钥、OAuth、券商凭据等）。编排参数（pin 版本、换镜像源等）放在独立的 `.env`（可选）：
 
 ```env
-IMAGE_TAG=v3.0.8
+IMAGE_TAG=v3.0.9
 # BACKEND_IMAGE=ghcr.io/<你的fork>/quantdinger-backend     # 可选，用于 fork
 # FRONTEND_IMAGE=ghcr.io/<你的fork>/quantdinger-frontend
 ```
