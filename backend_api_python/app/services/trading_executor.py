@@ -821,10 +821,19 @@ class TradingExecutor:
         """Fill missing grid legs from the exchange when local DB snapshot is empty."""
         if db_had_long and db_had_short:
             return
-        ex_cfg = trading_config.get("exchange_config") or {}
-        if not isinstance(ex_cfg, dict) or not (
-            ex_cfg.get("api_key") or ex_cfg.get("apiKey")
-        ):
+        try:
+            from app.services.exchange_execution import load_strategy_configs, resolve_exchange_config
+
+            sc = load_strategy_configs(int(strategy_id))
+            raw_ex = trading_config.get("exchange_config") or sc.get("exchange_config") or {}
+            ex_cfg = resolve_exchange_config(
+                raw_ex if isinstance(raw_ex, dict) else {},
+                user_id=int(sc.get("user_id") or 1),
+            )
+        except Exception as e:
+            logger.warning("Grid exchange hydrate resolve failed for sid=%s: %s", strategy_id, e)
+            return
+        if not isinstance(ex_cfg, dict) or not (ex_cfg.get("api_key") or ex_cfg.get("apiKey")):
             return
         market_type = str(trading_config.get("market_type") or "swap").strip().lower()
         try:
@@ -1011,6 +1020,7 @@ class TradingExecutor:
         trading_config: Dict[str, Any],
         exchange_config: Dict[str, Any],
         *,
+        user_id: int = 1,
         initial_capital: float,
         execution_mode: str,
         market_type: str,
@@ -1020,9 +1030,13 @@ class TradingExecutor:
         kline_exchange_id: Optional[str],
     ):
         from app.services.grid.runner import GridRestingRunner
+        from app.services.exchange_execution import resolve_exchange_config
         from app.services.live_trading.factory import create_client
 
-        ex_cfg = exchange_config if isinstance(exchange_config, dict) else {}
+        ex_cfg = resolve_exchange_config(
+            exchange_config if isinstance(exchange_config, dict) else {},
+            user_id=int(user_id or 1),
+        )
         mt = str(market_type or "swap")
 
         def _create_client():
@@ -1060,6 +1074,7 @@ class TradingExecutor:
             symbol,
             trading_config,
             ex_cfg,
+            user_id=int(user_id or 1),
             initial_capital=float(initial_capital or 0),
             enqueue_market_fn=_enqueue,
             create_client_fn=_create_client,
@@ -1440,6 +1455,35 @@ class TradingExecutor:
         for log in logs:
             append_strategy_log(strategy_id, "info", log)
 
+    def _maybe_log_bar_close_ui(
+        self,
+        strategy_id: int,
+        *,
+        symbol: str,
+        timeframe: str,
+        close_price: float,
+        pending_count: int,
+        bar_ts: int,
+    ) -> None:
+        """One UI log line per closed bar so users can see the loop is alive."""
+        try:
+            sid = int(strategy_id)
+            ts = int(bar_ts or 0)
+            if ts <= 0:
+                return
+            last = self._strategy_ui_log_last_tick_ts.get(sid, 0)
+            if ts <= last:
+                return
+            self._strategy_ui_log_last_tick_ts[sid] = ts
+            append_strategy_log(
+                sid,
+                "info",
+                f"Bar closed {symbol} {timeframe} close={float(close_price or 0):.6f} "
+                f"pending_signals={int(pending_count or 0)}",
+            )
+        except Exception:
+            pass
+
     def _script_evaluate_in_progress_bar(
         self,
         df: pd.DataFrame,
@@ -1760,6 +1804,23 @@ class TradingExecutor:
                         trading_config["trade_direction"] = td
                     strategy["trading_config"] = trading_config
 
+            # Resolve credential references before any strategy branch (grid / bots / cross-sectional).
+            exchange_config = strategy.get('exchange_config') or {}
+            try:
+                from app.services.exchange_execution import resolve_exchange_config
+
+                exchange_config = resolve_exchange_config(
+                    exchange_config if isinstance(exchange_config, dict) else {},
+                    user_id=int(strategy_user_id or strategy.get('user_id') or 1),
+                )
+                strategy['exchange_config'] = exchange_config
+            except Exception as e:
+                logger.warning(f"Strategy {strategy_id} resolve exchange_config failed: {e}")
+            if isinstance(trading_config, dict):
+                trading_config.setdefault('execution_mode', execution_mode)
+                if exchange_config:
+                    trading_config['exchange_config'] = exchange_config
+
             # Check if this is a cross-sectional strategy（仅指标策略支持）
             cs_strategy_type = trading_config.get('cs_strategy_type', 'single')
             if (not is_script) and cs_strategy_type == 'cross_sectional':
@@ -1778,18 +1839,13 @@ class TradingExecutor:
             # 初始化交易所连接（信号模式下无需真实连接）
             exchange = None
 
-            # Best-effort: query the real fee tier from the exchange (cached per strategy)
-            exchange_config = strategy.get('exchange_config') or {}
-            if isinstance(trading_config, dict):
-                trading_config.setdefault('execution_mode', execution_mode)
-                if exchange_config:
-                    trading_config.setdefault('exchange_config', exchange_config)
             kline_exchange_id, kline_market_type = self._live_crypto_kline_params(
                 market_category=market_category,
                 market_type=market_type,
                 execution_mode=execution_mode,
                 exchange_config=exchange_config,
                 trading_config=trading_config,
+                user_id=int(strategy_user_id or strategy.get('user_id') or 1),
             )
             self._log_crypto_kline_source(
                 strategy_id, market_category, execution_mode, kline_exchange_id, kline_market_type
@@ -1940,6 +1996,7 @@ class TradingExecutor:
                         symbol,
                         trading_config,
                         exchange_config,
+                        user_id=int(strategy_user_id or strategy.get('user_id') or 1),
                         initial_capital=initial_capital,
                         execution_mode=execution_mode,
                         market_type=market_type,
@@ -2173,6 +2230,21 @@ class TradingExecutor:
                                                         current_close,
                                                         highest_price=new_hp
                                                     )
+                                            try:
+                                                bar_ts = int(
+                                                    indicator_result.get('last_kline_time', 0)
+                                                    or df.index[-1].timestamp()
+                                                )
+                                            except Exception:
+                                                bar_ts = 0
+                                            self._maybe_log_bar_close_ui(
+                                                strategy_id,
+                                                symbol=symbol,
+                                                timeframe=timeframe,
+                                                close_price=float(df['close'].iloc[-1]),
+                                                pending_count=len(pending_signals or []),
+                                                bar_ts=bar_ts,
+                                            )
                         finally:
                             next_kline_poll_at = next_kline_boundary_poll_ts(
                                 max(current_time, next_kline_poll_at),
@@ -2857,6 +2929,7 @@ class TradingExecutor:
         execution_mode: str,
         exchange_config: Optional[Dict[str, Any]],
         trading_config: Optional[Dict[str, Any]] = None,
+        user_id: int = 1,
     ) -> Tuple[Optional[str], Optional[str]]:
         """加密货币策略（signal/live）：有交易所则按绑定所拉 K 线；否则走 Settings 全局数据源。"""
         if (market_category or "").strip() != "Crypto":
@@ -2866,8 +2939,20 @@ class TradingExecutor:
             return None, None
         from app.data_sources.crypto import resolve_crypto_venue
 
+        cfg = exchange_config if isinstance(exchange_config, dict) else {}
+        cred_ref = cfg.get("credential_id") or cfg.get("credentials_id")
+        if cred_ref and not (
+            cfg.get("exchange_id") or cfg.get("exchangeId") or cfg.get("exchange")
+        ):
+            try:
+                from app.services.exchange_execution import resolve_exchange_config
+
+                cfg = resolve_exchange_config(cfg, user_id=int(user_id or 1))
+            except Exception:
+                pass
+
         ex, mt = resolve_crypto_venue(
-            exchange_config=exchange_config,
+            exchange_config=cfg,
             trading_config=trading_config,
             market_type=market_type,
         )
@@ -5418,6 +5503,7 @@ class TradingExecutor:
             execution_mode=execution_mode,
             exchange_config=exchange_config,
             trading_config=trading_config,
+            user_id=int(strategy.get('user_id') or 1),
         )
         self._log_crypto_kline_source(
             strategy_id, market_category, execution_mode, kline_exchange_id, kline_market_type

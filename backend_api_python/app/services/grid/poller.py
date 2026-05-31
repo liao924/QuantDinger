@@ -11,6 +11,7 @@ from typing import Dict, List, Optional, Tuple
 from app.services.grid.exchange_orders import query_grid_order_fill
 from app.services.grid.resting_orders_repo import GridRestingOrder, GridRestingOrderRepository
 from app.services.grid.runner import get_runner
+from app.services.exchange_execution import resolve_exchange_config
 from app.services.live_trading.factory import create_client
 from app.utils.logger import get_logger
 
@@ -140,7 +141,11 @@ class GridFillPoller:
             client = clients.get(cred_key)
             if client is None:
                 try:
-                    client = create_client(runner.exchange_config, market_type=cfg.market_type)
+                    ex_cfg = resolve_exchange_config(
+                        runner.exchange_config if isinstance(runner.exchange_config, dict) else {},
+                        user_id=int(getattr(runner, "user_id", 0) or 1),
+                    )
+                    client = create_client(ex_cfg, market_type=cfg.market_type)
                     clients[cred_key] = client
                 except Exception as e:
                     logger.debug("grid poller client sid=%s: %s", sid, e)

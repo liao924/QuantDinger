@@ -44,12 +44,14 @@ class GridRestingRunner:
         trading_config: Dict[str, Any],
         exchange_config: Dict[str, Any],
         *,
+        user_id: int = 1,
         initial_capital: float,
         enqueue_market_fn: Callable[[str, float, float, str], bool],
         create_client_fn: Callable[[], Any],
         risk_exit_fn: Optional[Callable[[float], list]] = None,
     ) -> None:
         self.strategy_id = int(strategy_id)
+        self.user_id = int(user_id or 1)
         self.symbol = str(symbol or "")
         self.trading_config = dict(trading_config or {})
         self.trading_config["initial_capital"] = float(initial_capital or 0)
@@ -88,8 +90,21 @@ class GridRestingRunner:
         ok2, msg2 = self._engine.bootstrap(current_price)
         if not ok2:
             return False, msg2
+        try:
+            self._engine._create_client()
+        except Exception as e:
+            msg = str(e or "exchange client failed")
+            append_strategy_log(self.strategy_id, "error", f"Grid exchange client failed: {msg}")
+            return False, msg
         self._engine.run_initial_market_position(current_price)
         n = self._engine.sync_grid_orders(current_price)
+        if self._engine.stop_requested:
+            append_strategy_log(
+                self.strategy_id,
+                "error",
+                "Grid startup aborted: resting limit orders failed (check exchange credentials)",
+            )
+            return False, "grid resting limit orders failed during startup"
         self._started = True
         register_runner(self)
         append_strategy_log(self.strategy_id, "info", f"Grid resting live started, placed {n} entry limits")

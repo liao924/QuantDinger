@@ -457,7 +457,17 @@ class GridEngine:
         open_orders = self._orders.list_open(self.strategy_id)
         try:
             client = self._create_client()
-        except Exception:
+        except Exception as e:
+            logger.warning(
+                "grid cancel_entry_orders create_client failed sid=%s: %s",
+                self.strategy_id,
+                e,
+            )
+            append_strategy_log(
+                self.strategy_id,
+                "error",
+                f"Grid cancel entry orders failed (exchange client): {e}",
+            )
             client = None
         for o in open_orders:
             if o.reduce_only or str(o.purpose or "").endswith("_exit"):
@@ -480,7 +490,17 @@ class GridEngine:
         open_orders = self._orders.list_open(self.strategy_id)
         try:
             client = self._create_client()
-        except Exception:
+        except Exception as e:
+            logger.warning(
+                "grid cancel_all_orders create_client failed sid=%s: %s",
+                self.strategy_id,
+                e,
+            )
+            append_strategy_log(
+                self.strategy_id,
+                "error",
+                f"Grid cancel all orders failed (exchange client): {e}",
+            )
             client = None
         for o in open_orders:
             if client:
