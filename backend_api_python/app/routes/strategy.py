@@ -950,12 +950,13 @@ def get_positions():
         now = int(time.time())
         # Fetch prices once per symbol to reduce API calls.
         sym_to_price: dict[str, float] = {}
-        for r in rows:
-            sym = (r.get("symbol") or "").strip()
+
+        def _fetch_symbol_price(sym: str) -> float:
+            sym = (sym or "").strip()
             if not sym:
-                continue
+                return 0.0
             if sym in sym_to_price:
-                continue
+                return sym_to_price[sym]
             try:
                 t = DataSourceFactory.get_ticker(
                     "Crypto",
@@ -966,8 +967,13 @@ def get_positions():
                 px = float(t.get("last") or t.get("close") or 0.0)
                 if px > 0:
                     sym_to_price[sym] = px
+                    return px
             except Exception:
-                continue
+                pass
+            return 0.0
+
+        for r in rows:
+            _fetch_symbol_price((r.get("symbol") or "").strip())
 
         # Apply to rows and persist best-effort
         out = []
@@ -1039,6 +1045,14 @@ def get_positions():
                 logger.warning(
                     "account reconciliation failed for strategy %s: %s", strategy_id, e
                 )
+
+        for leg in account_legs:
+            sym = str(leg.get("symbol") or "").strip()
+            if not sym:
+                continue
+            live_px = _fetch_symbol_price(sym)
+            if live_px > 0:
+                leg["mark_price"] = live_px
 
         # Live strategies: when L3 ledger is empty but exchange has legs, surface account mirror
         # so the UI is not blank while grid initial fills are still syncing.

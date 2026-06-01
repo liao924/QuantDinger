@@ -33,6 +33,9 @@ def symbols_equivalent(a: str, b: str) -> bool:
     return na.replace("/", "") == nb.replace("/", "")
 
 
+from app.services.live_trading.position_row_parse import position_base_qty_for_side
+
+
 def query_exchange_position_size(
     *,
     client: Any,
@@ -83,18 +86,27 @@ def query_exchange_position_size(
         inst_id = to_okx_swap_inst_id(sym)
         pos_resp = client.get_positions(inst_id=inst_id) or {}
         pos_data = (pos_resp.get("data") or []) if isinstance(pos_resp, dict) else []
+        ct_val_cache = 0.0
         for pos in pos_data:
             if not isinstance(pos, dict):
                 continue
             if str(pos.get("instId") or "").strip() != inst_id:
                 continue
-            if str(pos.get("posSide") or "").strip().lower() != side:
-                continue
-            pos_qty = abs(float(pos.get("pos") or 0.0))
-            ct_val = float(pos.get("ctVal") or 0.0)
-            if ct_val > 0:
-                return pos_qty * ct_val
-            return pos_qty
+            try:
+                ct_val = float(pos.get("ctVal") or 0.0)
+            except (TypeError, ValueError):
+                ct_val = 0.0
+            if ct_val <= 0 and ct_val_cache <= 0:
+                try:
+                    inst = client.get_instrument(inst_type="SWAP", inst_id=inst_id) or {}
+                    ct_val_cache = float(inst.get("ctVal") or 0.0)
+                except Exception:
+                    ct_val_cache = 0.0
+            mult = ct_val if ct_val > 0 else (ct_val_cache if ct_val_cache > 0 else 1.0)
+            qty = position_base_qty_for_side(pos, side, contracts_to_base=mult)
+            if qty > 0:
+                return qty
+        return 0.0
 
     if isinstance(client, BinanceFuturesClient):
         norm_sym = sym.replace("/", "").replace("-", "").upper()
@@ -108,11 +120,9 @@ def query_exchange_position_size(
                 continue
             if str(pos.get("symbol") or "").upper() != norm_sym:
                 continue
-            p_side = str(pos.get("positionSide") or "").strip().lower()
-            if p_side == side or (p_side == "both" and side in ("long", "short")):
-                amt = abs(float(pos.get("positionAmt") or 0.0))
-                if amt > 0:
-                    return amt
+            qty = position_base_qty_for_side(pos, side)
+            if qty > 0:
+                return qty
         return 0.0
 
     if isinstance(client, BybitClient):
@@ -124,11 +134,9 @@ def query_exchange_position_size(
                 continue
             if str(pos.get("symbol") or "").strip().upper() != want:
                 continue
-            p_side = str(pos.get("side") or "").strip().lower()
-            if (p_side == "buy" and side == "long") or (p_side == "sell" and side == "short"):
-                sz = abs(float(pos.get("size") or 0.0))
-                if sz > 0:
-                    return sz
+            qty = position_base_qty_for_side(pos, side)
+            if qty > 0:
+                return qty
         return 0.0
 
     if isinstance(client, BitgetMixClient):
@@ -141,11 +149,9 @@ def query_exchange_position_size(
                 continue
             if to_bitget_um_symbol(str(pos.get("symbol") or "")).upper() != want:
                 continue
-            if str(pos.get("holdSide") or "").strip().lower() != side:
-                continue
-            sz = abs(float(pos.get("total") or pos.get("available") or 0.0))
-            if sz > 0:
-                return sz
+            qty = position_base_qty_for_side(pos, side)
+            if qty > 0:
+                return qty
         return 0.0
 
     if isinstance(client, GateUsdtFuturesClient):
@@ -158,24 +164,15 @@ def query_exchange_position_size(
             contract = str(p.get("contract") or "").strip()
             if contract != want_contract and not symbols_equivalent(contract.replace("_", "/"), sym):
                 continue
-            try:
-                sz_ct = float(p.get("size") or 0.0)
-            except Exception:
-                sz_ct = 0.0
-            if abs(sz_ct) <= 0:
-                continue
-            p_side = "long" if sz_ct > 0 else "short"
-            if p_side != side:
-                continue
-            qty_base = abs(sz_ct)
+            qm = 1.0
             try:
                 meta = client.get_contract(contract=contract) or {}
-                qm = float(meta.get("quanto_multiplier") or meta.get("contract_size") or 0.0)
-                if qm > 0:
-                    qty_base = qty_base * qm
+                qm = float(meta.get("quanto_multiplier") or meta.get("contract_size") or 0.0) or 1.0
             except Exception:
-                pass
-            return float(qty_base)
+                qm = 1.0
+            qty_base = position_base_qty_for_side(p, side, contracts_to_base=qm)
+            if qty_base > 0:
+                return float(qty_base)
 
     if isinstance(client, KucoinFuturesClient):
         resp = client.get_positions() or {}
@@ -186,21 +183,13 @@ def query_exchange_position_size(
             p_sym = str(p.get("symbol") or "").strip()
             if not symbols_equivalent(p_sym, sym):
                 continue
-            try:
-                qty_ct = float(p.get("currentQty") or p.get("quantity") or 0.0)
-            except Exception:
-                qty_ct = 0.0
-            p_side = "long" if qty_ct > 0 else "short"
-            if p_side != side:
-                continue
-            qty_base = abs(qty_ct)
+            mult = 1.0
             try:
                 meta = client.get_contract(symbol=p_sym) or {}
-                mult = float(meta.get("multiplier") or meta.get("lotSize") or 0.0)
-                if mult > 0:
-                    qty_base = qty_base * mult
+                mult = float(meta.get("multiplier") or meta.get("lotSize") or 0.0) or 1.0
             except Exception:
-                pass
+                mult = 1.0
+            qty_base = position_base_qty_for_side(p, side, contracts_to_base=mult)
             if qty_base > 0:
                 return float(qty_base)
         return 0.0
@@ -218,15 +207,9 @@ def query_exchange_position_size(
             p_sym = str(p.get("symbol") or p.get("instrument") or "").strip()
             if sym and p_sym and not symbols_equivalent(p_sym, sym):
                 continue
-            try:
-                sz = float(p.get("size") or p.get("positionSize") or 0.0)
-            except Exception:
-                sz = 0.0
-            p_side = "long" if sz > 0 else "short"
-            if p_side != side:
-                continue
-            if abs(sz) > 0:
-                return abs(sz)
+            qty = position_base_qty_for_side(p, side)
+            if qty > 0:
+                return qty
         return 0.0
 
     if isinstance(client, DeepcoinClient):
@@ -244,17 +227,13 @@ def query_exchange_position_size(
         for p in data:
             if not isinstance(p, dict):
                 continue
-            p_side = str(p.get("posSide") or p.get("holdSide") or "").strip().lower()
-            if p_side and p_side != side:
-                continue
             inst = str(p.get("instId") or p.get("symbol") or "")
             if sym and inst and not symbols_equivalent(inst, sym):
                 continue
-            sz = abs(float(p.get("pos") or p.get("availPos") or p.get("size") or 0.0))
-            if sz > 0:
-                if getattr(client, "market_type", "swap") != "spot":
-                    return sz * ct_val
-                return sz
+            mult = ct_val if getattr(client, "market_type", "swap") != "spot" else 1.0
+            qty = position_base_qty_for_side(p, side, contracts_to_base=mult)
+            if qty > 0:
+                return qty
         return 0.0
 
     if isinstance(client, HtxClient):
@@ -272,24 +251,13 @@ def query_exchange_position_size(
         for p in data:
             if not isinstance(p, dict):
                 continue
-            vol = abs(float(p.get("volume") or p.get("bal") or p.get("qty") or 0.0))
-            if vol <= 0:
-                continue
-            direction = str(p.get("direction") or p.get("side") or "").strip().lower()
-            if direction in ("buy", "long"):
-                p_side = "long"
-            elif direction in ("sell", "short"):
-                p_side = "short"
-            else:
-                p_side = "long"
-            if p_side != side:
-                continue
             contract = str(p.get("contract_code") or p.get("symbol") or "")
             if sym and contract and not symbols_equivalent(contract.replace("-", "/"), sym):
                 continue
-            if getattr(client, "market_type", "swap") != "spot" and contract_size != 1.0:
-                return vol * contract_size
-            return vol
+            mult = contract_size if getattr(client, "market_type", "swap") != "spot" else 1.0
+            qty = position_base_qty_for_side(p, side, contracts_to_base=mult)
+            if qty > 0:
+                return qty
         return 0.0
 
     # MT5 / IBKR / Alpaca (desktop brokers)
@@ -309,12 +277,9 @@ def query_exchange_position_size(
             ).strip()
             if sym and p_sym and not symbols_equivalent(p_sym, sym):
                 continue
-            qty = _broker_position_qty_and_side(p)
-            if qty is None:
-                continue
-            p_side, sz = qty
-            if p_side == side and sz > 0:
-                return sz
+            qty = position_base_qty_for_side(p, side)
+            if qty > 0:
+                return qty
     return 0.0
 
 
@@ -332,22 +297,6 @@ def _extract_position_rows(resp: Any) -> List[Any]:
             if isinstance(nested, list):
                 return nested
     return []
-
-
-def _broker_position_qty_and_side(p: Dict[str, Any]) -> Optional[Tuple[str, float]]:
-    """Normalize MT5 / IBKR / Alpaca position dicts to (side, size)."""
-    try:
-        qty = float(p.get("quantity") or p.get("volume") or p.get("size") or 0.0)
-    except Exception:
-        qty = 0.0
-    if abs(qty) <= 0:
-        return None
-    side_str = str(p.get("side") or p.get("type") or "").strip().lower()
-    if side_str in ("buy", "long") or qty > 0:
-        return "long", abs(qty)
-    if side_str in ("sell", "short") or qty < 0:
-        return "short", abs(qty)
-    return ("long" if qty > 0 else "short"), abs(qty)
 
 
 def resolve_reduce_only_quantity(

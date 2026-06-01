@@ -68,6 +68,7 @@ class GridRestingRunner:
         )
         self._started = False
         self._last_sync_ts = 0.0
+        self._last_exit_sync_ts = 0.0
 
     @property
     def engine(self) -> GridEngine:
@@ -98,6 +99,8 @@ class GridRestingRunner:
             return False, msg
         self._engine.run_initial_market_position(current_price)
         n = self._engine.sync_grid_orders(current_price)
+        if self._engine.cfg.initial_position_pct <= 0 or self._engine._initial_done:
+            self._engine.sync_exit_coverage(current_price)
         if self._engine.stop_requested:
             append_strategy_log(
                 self.strategy_id,
@@ -167,10 +170,12 @@ class GridRestingRunner:
         ):
             self._engine.run_initial_market_position(current_price)
 
-        if self._engine._initial_done and self._engine.cfg.initial_position_pct > 0 and not getattr(self, "_initial_exits_done", False):
-            n = self._engine.sync_initial_exit_orders(current_price)
-            if n > 0:
-                self._initial_exits_done = True
+        if self._engine.cfg.grid_direction in ("long", "short"):
+            if self._engine.cfg.initial_position_pct <= 0 or self._engine._initial_done:
+                now_exit = time.time()
+                if now_exit - self._last_exit_sync_ts >= 5.0:
+                    self._engine.sync_exit_coverage(current_price)
+                    self._last_exit_sync_ts = now_exit
 
         now = time.time()
         if now - self._last_sync_ts >= 15.0:

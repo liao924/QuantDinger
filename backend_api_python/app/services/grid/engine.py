@@ -12,6 +12,7 @@ from app.services.grid.exchange_orders import (
     make_grid_client_order_id,
     make_grid_initial_client_order_id,
     place_grid_limit_order,
+    wait_grid_market_fill,
 )
 from app.services.grid.fill_handler import record_grid_market_fill
 from app.services.grid.levels import GridCellSpec, generate_cells, generate_levels
@@ -58,6 +59,8 @@ class GridEngine:
         self._stop_requested = False
         self._last_initial_attempt_ts = 0.0
         self._initial_retry_sec = 30.0
+        self._initial_market_attempts = 0
+        self._initial_market_max_attempts = 3
 
     @property
     def stop_requested(self) -> bool:
@@ -189,6 +192,56 @@ class GridEngine:
             return "short"
         return "long"
 
+    def _probe_initial_client_order_fill(
+        self,
+        client: Any,
+        client_order_id: str,
+        signal_type: str,
+        reason: str,
+        price: float,
+    ) -> bool:
+        """If a prior initial market order already filled, sync local state without re-placing."""
+        coid = str(client_order_id or "").strip()
+        if not coid or client is None:
+            return False
+        try:
+            filled, avg = wait_grid_market_fill(
+                client,
+                symbol=self.symbol,
+                market_type=self.cfg.market_type,
+                exchange_config=self.exchange_config,
+                exchange_order_id="",
+                client_order_id=coid,
+                max_wait_sec=3.0,
+            )
+        except Exception as e:
+            logger.debug("grid initial probe sid=%s: %s", self.strategy_id, e)
+            return False
+        if filled <= 0:
+            return False
+        px = float(avg or price or 0)
+        record_grid_market_fill(
+            self.strategy_id,
+            self.symbol,
+            signal_type,
+            filled,
+            px,
+            self.trading_config,
+            reason=reason,
+        )
+        append_strategy_log(
+            self.strategy_id,
+            "info",
+            f"Grid initial market recovered from client order: {filled:.6f} @ {px:.4f}",
+        )
+        return True
+
+    def _stop_initial_market_retries(self, *, reason: str = "") -> None:
+        self._initial_done = True
+        persist_grid_resting_state(self.strategy_id, {"initial_market_done": True})
+        if reason:
+            append_strategy_log(self.strategy_id, "warning", reason)
+
     def _try_recover_initial_from_exchange(
         self,
         current_price: float,
@@ -208,7 +261,7 @@ class GridEngine:
         if exch_qty < target_qty * 0.85:
             return False
         record_qty = min(exch_qty, target_qty)
-        if exch_qty > target_qty * 1.15:
+        if exch_qty > target_qty * 1.05:
             append_strategy_log(
                 self.strategy_id,
                 "error",
@@ -256,6 +309,16 @@ class GridEngine:
             self.strategy_id,
             leg=self._pos_side_for_signal(signal_type),
         )
+        pos_side = self._pos_side_for_signal(signal_type)
+        exch_qty = self._leg_position_qty(pos_side)
+        if qty > 0 and exch_qty >= qty * 0.85:
+            return self._try_recover_initial_from_exchange(price, signal_type, reason)
+        try:
+            client = self._create_client()
+            if self._probe_initial_client_order_fill(client, coid, signal_type, reason, price):
+                return True
+        except Exception as e:
+            logger.debug("grid initial pre-place probe sid=%s: %s", self.strategy_id, e)
         try:
             client = self._create_client()
             ok, filled, avg = execute_grid_market_order(
@@ -281,6 +344,7 @@ class GridEngine:
                 f"Grid initial market {signal_type} not filled (qty={qty:.6f} @ {price:.4f})",
             )
             return False
+        self._initial_market_attempts = 0
         record_grid_market_fill(
             self.strategy_id,
             self.symbol,
@@ -327,10 +391,54 @@ class GridEngine:
         if self._try_recover_initial_from_exchange(current_price, sig, reason):
             return True
 
+        pos_side = self._pos_side_for_signal(sig)
+        target_qty = self._target_initial_base_qty(current_price)
+        exch_qty = self._leg_position_qty(pos_side)
+        if target_qty > 0 and exch_qty >= target_qty * 0.85:
+            if self._try_recover_initial_from_exchange(current_price, sig, reason):
+                return True
+        if target_qty > 0 and exch_qty > target_qty * 1.05:
+            self._stop_initial_market_retries(
+                reason=(
+                    f"Grid initial market halted: exchange {pos_side} {exch_qty:.6f} "
+                    f"exceeds target {target_qty:.6f}"
+                ),
+            )
+            if not self._has_initial_market_trade():
+                record_grid_market_fill(
+                    self.strategy_id,
+                    self.symbol,
+                    sig,
+                    min(exch_qty, target_qty),
+                    current_price,
+                    self.trading_config,
+                    reason=reason,
+                )
+            return True
+
         now = time.time()
         if now - float(self._last_initial_attempt_ts or 0.0) < float(self._initial_retry_sec):
             return False
         self._last_initial_attempt_ts = now
+        self._initial_market_attempts += 1
+        if self._initial_market_attempts > self._initial_market_max_attempts:
+            if self._try_recover_initial_from_exchange(current_price, sig, reason):
+                return True
+            if exch_qty > 0:
+                self._stop_initial_market_retries(
+                    reason=(
+                        f"Grid initial market halted after {self._initial_market_max_attempts} attempts; "
+                        f"exchange {pos_side}={exch_qty:.6f}"
+                    ),
+                )
+                return True
+            append_strategy_log(
+                self.strategy_id,
+                "error",
+                f"Grid initial market abandoned after {self._initial_market_max_attempts} attempts",
+            )
+            self._stop_initial_market_retries()
+            return False
 
         if direction == "short":
             ok = self._sync_initial_market_leg(
@@ -395,69 +503,102 @@ class GridEngine:
                         placed += 1
         return placed
 
-    def sync_initial_exit_orders(self, current_price: float) -> int:
-        """After initial market position, hang one take-profit limit on the active cell."""
-        if not self._initial_done or self.cfg.initial_position_pct <= 0 or current_price <= 0:
+    def _active_cell_for_price(
+        self,
+        cells: list,
+        current_price: float,
+        direction: str,
+    ) -> Optional[GridCellSpec]:
+        if not cells or current_price <= 0:
+            return None
+        for cell in cells:
+            if cell.lower_price < current_price <= cell.upper_price:
+                return cell
+        if direction == "long":
+            for cell in reversed(cells):
+                if cell.lower_price < current_price:
+                    return cell
+        elif direction == "short":
+            for cell in cells:
+                if cell.upper_price > current_price:
+                    return cell
+        return None
+
+    def _open_exit_qty(self, purpose: str) -> float:
+        total = 0.0
+        for order in self._orders.list_open(self.strategy_id):
+            if str(order.purpose or "") != purpose:
+                continue
+            rem = float(order.quantity or 0) - float(order.processed_fill_qty or 0)
+            if rem > 0:
+                total += rem
+        return total
+
+    def sync_exit_coverage(self, current_price: float) -> int:
+        """Ensure reduce-only exit limits cover live exchange position."""
+        if not self._bootstrapped or current_price <= 0:
             return 0
         direction = self.cfg.grid_direction
-        if direction == "neutral":
+        if direction not in ("long", "short"):
             return 0
+
         _, cells = self._levels_and_cells()
         if not cells:
             return 0
 
-        target_cell: Optional[GridCellSpec] = None
-        for cell in cells:
-            if cell.lower_price < current_price <= cell.upper_price:
-                target_cell = cell
-                break
-
-        placed = 0
         if direction == "long":
-            qty = self._leg_position_qty("long")
-            if qty <= 0:
-                return 0
-            if target_cell is None:
-                for cell in reversed(cells):
-                    if cell.lower_price < current_price:
-                        target_cell = cell
-                        break
-            if target_cell and not self._orders.has_open_for_cell(
-                self.strategy_id, target_cell.index, "long_exit"
-            ):
-                if self._place_limit(
-                    target_cell,
-                    "long_exit",
-                    "sell",
-                    target_cell.upper_price,
-                    reduce_only=True,
-                    pos_side="long",
-                    quantity=qty,
-                ):
-                    placed += 1
-        elif direction == "short":
-            qty = self._leg_position_qty("short")
-            if qty <= 0:
-                return 0
-            if target_cell is None:
-                for cell in cells:
-                    if cell.upper_price > current_price:
-                        target_cell = cell
-                        break
-            if target_cell and not self._orders.has_open_for_cell(
-                self.strategy_id, target_cell.index, "short_exit"
-            ):
-                if self._place_limit(
-                    target_cell,
-                    "short_exit",
-                    "buy",
-                    target_cell.lower_price,
-                    reduce_only=True,
-                    pos_side="short",
-                    quantity=qty,
-                ):
-                    placed += 1
-        return placed
+            pos_qty = self._leg_position_qty("long")
+            purpose, side, pos_side = "long_exit", "sell", "long"
+            exit_px = lambda cell: float(cell.upper_price or 0)
+        else:
+            pos_qty = self._leg_position_qty("short")
+            purpose, side, pos_side = "short_exit", "buy", "short"
+            exit_px = lambda cell: float(cell.lower_price or 0)
+
+        if pos_qty <= 1e-10:
+            return 0
+
+        covered = self._open_exit_qty(purpose)
+        deficit = pos_qty - covered
+        if deficit <= 1e-8:
+            return 0
+
+        target_cell = self._active_cell_for_price(cells, current_price, direction)
+        if not target_cell:
+            return 0
+
+        px = exit_px(target_cell)
+        if px <= 0:
+            return 0
+
+        ok = self._place_limit(
+            target_cell,
+            purpose,
+            side,
+            px,
+            reduce_only=True,
+            pos_side=pos_side,
+            quantity=deficit,
+        )
+        if ok:
+            append_strategy_log(
+                self.strategy_id,
+                "info",
+                f"Grid exit coverage {purpose} cell={target_cell.index} @ {px:.4f} "
+                f"qty={deficit:.6f} (pos={pos_qty:.6f} covered={covered:.6f})",
+            )
+            return 1
+        return 0
+
+    def sync_initial_exit_orders(self, current_price: float) -> int:
+        """After initial market position, hang take-profit limits on the active cell."""
+        if not self._bootstrapped or current_price <= 0:
+            return 0
+        if self.cfg.grid_direction not in ("long", "short"):
+            return 0
+        if self.cfg.initial_position_pct > 0 and not self._initial_done:
+            return 0
+        return self.sync_exit_coverage(current_price)
 
     def _place_limit(
         self,
@@ -480,7 +621,11 @@ class GridEngine:
         coid = make_grid_client_order_id(self.strategy_id, cell.index, purpose)
         try:
             client = self._create_client()
-            post_only = self.cfg.order_mode in ("maker", "limit", "limit_first", "maker_then_market")
+            # Exit (reduce-only) orders may need to cross when price is above/below the grid line.
+            post_only = (
+                not reduce_only
+                and self.cfg.order_mode in ("maker", "limit", "limit_first", "maker_then_market")
+            )
             res = place_grid_limit_order(
                 client,
                 symbol=self.symbol,

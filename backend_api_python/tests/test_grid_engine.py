@@ -153,3 +153,180 @@ def test_initial_market_recovers_from_exchange_without_new_order(monkeypatch):
     assert ok is True
     assert engine._initial_done is True
     assert recorded["calls"] == 1
+
+
+def test_sync_exit_coverage_places_long_exit_for_uncovered_position(monkeypatch):
+    from app.services.grid.engine import GridEngine
+    from app.services.grid.levels import generate_cells, generate_levels
+
+    tc = {
+        "initial_capital": 1000,
+        "leverage": 2,
+        "market_type": "swap",
+        "bot_params": {
+            "upperPrice": 758,
+            "lowerPrice": 588,
+            "gridCount": 23,
+            "amountPerGrid": 20,
+            "gridDirection": "long",
+            "initialPositionPct": 20,
+        },
+    }
+    placed = []
+
+    def fake_place(self, cell, purpose, side, price, *, reduce_only, pos_side, quantity=None):
+        placed.append(
+            {
+                "purpose": purpose,
+                "side": side,
+                "price": price,
+                "reduce_only": reduce_only,
+                "quantity": quantity,
+                "cell": cell.index,
+            }
+        )
+        return True
+
+    monkeypatch.setattr("app.services.grid.engine.append_strategy_log", lambda *a, **k: None)
+    monkeypatch.setattr("app.services.grid.engine.GridEngine._place_limit", fake_place)
+    monkeypatch.setattr("app.services.grid.engine.GridEngine._leg_position_qty", lambda self, side: 4.08)
+    monkeypatch.setattr(
+        "app.services.grid.engine.GridEngine._levels_and_cells",
+        lambda self: (
+            generate_levels(588, 758, 23, "arithmetic"),
+            generate_cells(generate_levels(588, 758, 23, "arithmetic")),
+        ),
+    )
+
+    class FakeOrders:
+        def list_open(self, strategy_id):
+            return []
+
+    engine = GridEngine(
+        9,
+        "BNB/USDT",
+        tc,
+        {},
+        create_client_fn=lambda: object(),
+        enqueue_market=lambda *a, **k: False,
+    )
+    engine._bootstrapped = True
+    engine._orders = FakeOrders()
+
+    n = engine.sync_exit_coverage(676.8)
+    assert n == 1
+    assert len(placed) == 1
+    assert placed[0]["purpose"] == "long_exit"
+    assert placed[0]["side"] == "sell"
+    assert placed[0]["reduce_only"] is True
+    assert placed[0]["quantity"] == pytest.approx(4.08)
+    assert placed[0]["price"] > 676.8 - 20  # active cell upper near current price
+
+
+def test_sync_exit_coverage_skips_when_exits_already_cover_position(monkeypatch):
+    from app.services.grid.engine import GridEngine
+    from app.services.grid.resting_orders_repo import GridRestingOrder
+
+    tc = {
+        "initial_capital": 1000,
+        "leverage": 2,
+        "market_type": "swap",
+        "bot_params": {
+            "upperPrice": 758,
+            "lowerPrice": 588,
+            "gridCount": 23,
+            "amountPerGrid": 20,
+            "gridDirection": "long",
+            "initialPositionPct": 20,
+        },
+    }
+    monkeypatch.setattr("app.services.grid.engine.GridEngine._leg_position_qty", lambda self, side: 4.08)
+    monkeypatch.setattr(
+        "app.services.grid.engine.GridEngine._levels_and_cells",
+        lambda self: ([], []),
+    )
+
+    open_exit = GridRestingOrder(
+        id=1,
+        strategy_id=9,
+        symbol="BNB/USDT",
+        cell_index=11,
+        purpose="long_exit",
+        side="sell",
+        pos_side="long",
+        reduce_only=True,
+        price=676.7,
+        quantity=4.08,
+        quote_amount=20,
+        client_order_id="x",
+        exchange_order_id="y",
+        status="open",
+        filled_quantity=0,
+        processed_fill_qty=0,
+    )
+
+    class FakeOrders:
+        def list_open(self, strategy_id):
+            return [open_exit]
+
+    engine = GridEngine(
+        9,
+        "BNB/USDT",
+        tc,
+        {},
+        create_client_fn=lambda: object(),
+        enqueue_market=lambda *a, **k: False,
+    )
+    engine._bootstrapped = True
+    engine._orders = FakeOrders()
+
+    assert engine.sync_exit_coverage(676.8) == 0
+
+
+def test_run_initial_market_stops_when_okx_net_position_exists(monkeypatch):
+    from app.services.grid.engine import GridEngine
+
+    tc = {
+        "initial_capital": 1000,
+        "leverage": 2,
+        "market_type": "swap",
+        "bot_params": {
+            "upperPrice": 758,
+            "lowerPrice": 588,
+            "gridCount": 23,
+            "amountPerGrid": 20,
+            "gridDirection": "long",
+            "initialPositionPct": 20,
+        },
+    }
+    recorded = {"calls": 0, "market": 0}
+
+    def fake_record(*args, **kwargs):
+        recorded["calls"] += 1
+
+    def fake_market(*args, **kwargs):
+        recorded["market"] += 1
+        return False, 0.0, 0.0
+
+    monkeypatch.setattr("app.services.grid.engine.record_grid_market_fill", fake_record)
+    monkeypatch.setattr("app.services.grid.engine.append_strategy_log", lambda *a, **k: None)
+    monkeypatch.setattr("app.services.grid.engine.persist_grid_resting_state", lambda *a, **k: None)
+    monkeypatch.setattr("app.services.grid.engine.GridEngine._has_initial_market_trade", lambda self: False)
+    monkeypatch.setattr("app.services.grid.engine.execute_grid_market_order", fake_market)
+
+    engine = GridEngine(
+        11,
+        "BNB/USDT",
+        tc,
+        {},
+        create_client_fn=lambda: object(),
+        enqueue_market=lambda *a, **k: False,
+    )
+    target = engine._target_initial_base_qty(679.0)
+    monkeypatch.setattr("app.services.grid.engine.GridEngine._leg_position_qty", lambda self, side: target)
+
+    ok = engine.run_initial_market_position(679.0)
+    assert ok is True
+    assert engine._initial_done is True
+    assert recorded["calls"] == 1
+    assert recorded["market"] == 0
