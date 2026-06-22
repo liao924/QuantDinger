@@ -546,6 +546,36 @@ def login_with_code():
             security.log_security_event('login_blocked', user.get('id'), ip_address, user_agent,
                                        {'reason': 'account_disabled'})
             return jsonify({'code': 0, 'msg': 'Account is disabled', 'data': None}), 403
+
+        if user.get('status') == 'pending':
+            return jsonify({'code': 0, 'msg': 'Account is pending activation', 'data': None}), 403
+
+        if not is_new_user:
+            try:
+                from app.services.mfa_service import get_mfa_service
+                mfa = get_mfa_service()
+                user_id_for_mfa = int(user.get('id'))
+                need_mfa, reason = mfa.needs_login_mfa(user_id_for_mfa, ip_address, user_agent)
+                if need_mfa:
+                    challenge = mfa.create_login_challenge(user_id_for_mfa, reason, ip_address, user_agent)
+                    security.log_security_event(
+                        'mfa_required',
+                        user_id_for_mfa,
+                        ip_address,
+                        user_agent,
+                        {'email': email, 'reason': reason, 'method': 'email_code'}
+                    )
+                    return jsonify({
+                        'code': 1,
+                        'msg': 'MFA verification required',
+                        'data': {
+                            'mfa_required': True,
+                            **challenge
+                        }
+                    })
+            except Exception as e:
+                logger.error(f"MFA check failed after email-code authentication: {e}")
+                return jsonify({'code': 0, 'msg': 'MFA service unavailable', 'data': None}), 503
         
         # Increment token_version (invalidates old sessions for single-client login)
         try:
